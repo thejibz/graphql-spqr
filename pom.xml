@@ -63,8 +63,9 @@
     </dependencyManagement>
 
     <dependencies>
+        
         <dependency>
-            <groupId>io.microprofile.sandbox</groupId>
+            <groupId>org.eclipse.microprofile.graphql</groupId>
             <artifactId>microprofile-graphql-api</artifactId>
             <version>1.0.0-SNAPSHOT</version>
         </dependency>
