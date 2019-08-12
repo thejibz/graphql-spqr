@@ -2,12 +2,12 @@ package io.leangen.graphql.generator.mapping.common;
 
 import graphql.schema.GraphQLOutputType;
 import io.leangen.geantyref.GenericTypeReflector;
-import io.leangen.graphql.annotations.types.GraphQLUnion;
 import io.leangen.graphql.generator.BuildContext;
 import io.leangen.graphql.generator.OperationMapper;
 import io.leangen.graphql.generator.mapping.TypeMapper;
 import io.leangen.graphql.metadata.exceptions.TypeMappingException;
 import io.leangen.graphql.util.ClassUtils;
+import org.eclipse.microprofile.graphql.Union;
 
 import java.lang.reflect.AnnotatedType;
 import java.util.Arrays;
@@ -23,19 +23,19 @@ public class UnionTypeMapper extends UnionMapper {
 
     @Override
     public GraphQLOutputType toGraphQLType(AnnotatedType javaType, OperationMapper operationMapper, Set<Class<? extends TypeMapper>> mappersToSkip, BuildContext buildContext) {
-        GraphQLUnion annotation = javaType.getAnnotation(GraphQLUnion.class);
+        org.eclipse.microprofile.graphql.Union annotation = javaType.getAnnotation(Union.class);
         List<AnnotatedType> possibleJavaTypes = getPossibleJavaTypes(javaType, buildContext);
         return toGraphQLUnion(annotation.name(), annotation.description(), javaType, possibleJavaTypes, operationMapper, buildContext);
     }
 
     @Override
     public boolean supports(AnnotatedType type) {
-        return type.isAnnotationPresent(GraphQLUnion.class)
-                || ClassUtils.getRawType(type.getType()).isAnnotationPresent(GraphQLUnion.class);
+        return type.isAnnotationPresent(org.eclipse.microprofile.graphql.Union.class)
+                || ClassUtils.getRawType(type.getType()).isAnnotationPresent(org.eclipse.microprofile.graphql.Union.class);
     }
 
     private List<AnnotatedType> getPossibleJavaTypes(AnnotatedType javaType, BuildContext buildContext) {
-        GraphQLUnion annotation = javaType.getAnnotation(GraphQLUnion.class);
+        org.eclipse.microprofile.graphql.Union annotation = javaType.getAnnotation(org.eclipse.microprofile.graphql.Union.class);
         List<AnnotatedType> possibleTypes = Collections.emptyList();
         if (annotation.possibleTypes().length > 0) {
             possibleTypes = Arrays.stream(annotation.possibleTypes())

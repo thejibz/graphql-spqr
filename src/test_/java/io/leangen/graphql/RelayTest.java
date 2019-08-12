@@ -16,7 +16,6 @@ import graphql.schema.GraphQLObjectType;
 import graphql.schema.GraphQLSchema;
 import io.leangen.geantyref.TypeToken;
 import io.leangen.graphql.annotations.GraphQLId;
-import io.leangen.graphql.annotations.GraphQLUnion;
 import io.leangen.graphql.domain.Cat;
 import io.leangen.graphql.domain.Character;
 import io.leangen.graphql.domain.Dog;

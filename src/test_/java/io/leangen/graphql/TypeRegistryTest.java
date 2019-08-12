@@ -6,7 +6,6 @@ import graphql.schema.GraphQLObjectType;
 import graphql.schema.GraphQLOutputType;
 import graphql.schema.GraphQLSchema;
 import io.leangen.graphql.annotations.GraphQLId;
-import io.leangen.graphql.annotations.GraphQLUnion;
 import io.leangen.graphql.annotations.Info;
 import io.leangen.graphql.domain.Education;
 import io.leangen.graphql.domain.Street;
