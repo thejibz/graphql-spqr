@@ -2,7 +2,9 @@ package io.leangen.graphql.metadata.strategy.query;
 
 import graphql.language.OperationDefinition;
 import io.leangen.geantyref.GenericTypeReflector;
+import io.leangen.graphql.annotations.GraphQLUnion;
 import io.leangen.graphql.execution.GlobalEnvironment;
+import io.leangen.graphql.generator.union.Union;
 import io.leangen.graphql.metadata.Operation;
 import io.leangen.graphql.metadata.OperationArgument;
 import io.leangen.graphql.metadata.Resolver;
@@ -10,7 +12,6 @@ import io.leangen.graphql.metadata.exceptions.TypeMappingException;
 import io.leangen.graphql.metadata.messages.MessageBundle;
 import io.leangen.graphql.util.ClassUtils;
 import io.leangen.graphql.util.Urls;
-import org.eclipse.microprofile.graphql.Union;
 
 import java.lang.reflect.AnnotatedType;
 import java.lang.reflect.Type;
@@ -87,6 +88,10 @@ public class DefaultOperationBuilder implements OperationBuilder {
                 .map(Resolver::getReturnType)
                 .collect(Collectors.toList());
 
+        if (resolvers.stream().anyMatch(resolver -> ClassUtils.containsTypeAnnotation(resolver.getReturnType(), GraphQLUnion.class))) {
+            return unionize(returnTypes.toArray(new AnnotatedType[0]), messageBundle);
+        }
+
         return resolveJavaType(returnTypes, "Multiple methods detected for operation \"" + operationName + "\" with different return types.");
     }
 
@@ -115,6 +120,9 @@ public class DefaultOperationBuilder implements OperationBuilder {
         return resolvers.stream().anyMatch(Resolver::isBatched);
     }
 
+    protected AnnotatedType unionize(AnnotatedType[] types, MessageBundle messageBundle) {
+        return Union.unionize(types, messageBundle);
+    }
 
     private AnnotatedType resolveJavaType(List<AnnotatedType> types, String errorPrefix) {
         errorPrefix = errorPrefix + " Types found: " + Arrays.toString(types.stream().map(type -> type.getType().getTypeName()).toArray()) + ". ";

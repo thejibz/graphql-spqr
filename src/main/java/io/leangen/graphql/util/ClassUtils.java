@@ -2,6 +2,7 @@ package io.leangen.graphql.util;
 
 import io.leangen.geantyref.GenericTypeReflector;
 import io.leangen.geantyref.TypeFactory;
+import io.leangen.graphql.annotations.GraphQLUnion;
 import io.leangen.graphql.metadata.exceptions.TypeMappingException;
 
 import java.beans.Introspector;
@@ -178,7 +179,9 @@ public class ClassUtils {
 
     public static <T extends AnnotatedType> T normalize(T type) {
         type = GenericTypeReflector.toCanonicalBoxed(type);
-
+        if (Arrays.stream(type.getAnnotations()).anyMatch(ann -> ann.annotationType().equals(GraphQLUnion.class))) {
+            type = removeAnnotations(type, Collections.singleton(GraphQLUnion.class));
+        }
         return type;
     }
 
