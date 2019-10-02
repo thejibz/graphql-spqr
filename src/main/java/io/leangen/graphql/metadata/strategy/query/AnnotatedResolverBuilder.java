@@ -98,8 +98,8 @@ public class AnnotatedResolverBuilder extends FilteredResolverBuilder {
         if (annotation instanceof Description) {
             return messageBundle.interpolate(((Description) annotation).value());
         }
-        
-        throw new IllegalArgumentException("Invalid operation annotations " + annotation);
+        return null;
+        //throw new IllegalArgumentException("Invalid operation annotations " + annotation);
     }
 
     private String deprecationReason(AnnotatedElement element, MessageBundle messageBundle) {
