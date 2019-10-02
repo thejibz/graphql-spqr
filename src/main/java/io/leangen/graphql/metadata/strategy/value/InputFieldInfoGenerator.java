@@ -12,6 +12,7 @@ import java.lang.reflect.AnnotatedElement;
 import java.lang.reflect.AnnotatedType;
 import java.util.List;
 import java.util.Optional;
+import org.eclipse.microprofile.graphql.Description;
 
 public class InputFieldInfoGenerator {
 
@@ -29,14 +30,10 @@ public class InputFieldInfoGenerator {
 
     public Optional<String> getDescription(List<AnnotatedElement> candidates, MessageBundle messageBundle) {
         Optional<String> explicit = candidates.stream()
-                .filter(element -> element.isAnnotationPresent(InputField.class))
+                .filter(element -> element.isAnnotationPresent(Description.class))
                 .findFirst()
-                .map(element -> element.getAnnotation(InputField.class).description());
-        Optional<String> implicit = candidates.stream()
-                .filter(element -> element.isAnnotationPresent(Query.class))
-                .findFirst()
-                .map(element -> element.getAnnotation(Query.class).description());
-        return Utils.or(explicit, implicit).filter(Utils::isNotEmpty).map(messageBundle::interpolate);
+                .map(element -> element.getAnnotation(Description.class).value());
+        return explicit.filter(Utils::isNotEmpty).map(messageBundle::interpolate);
     }
 
     public Optional<Object> defaultValue(List<AnnotatedElement> candidates, AnnotatedType type, DefaultValueProvider defaultValueProvider, GlobalEnvironment environment) {

@@ -23,6 +23,7 @@ import java.lang.reflect.Parameter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import org.eclipse.microprofile.graphql.Description;
 
 @SuppressWarnings("WeakerAccess")
 public class AnnotatedArgumentBuilder implements ResolverArgumentBuilder {
@@ -82,8 +83,8 @@ public class AnnotatedArgumentBuilder implements ResolverArgumentBuilder {
     }
 
     protected String getArgumentDescription(Parameter parameter, AnnotatedType parameterType, MessageBundle messageBundle) {
-        Argument meta = parameter.getAnnotation(Argument.class);
-        return meta != null ? messageBundle.interpolate(meta.description()) : null;
+        Description description = parameter.getAnnotation(Description.class);
+        return description != null ? messageBundle.interpolate(description.value()) : null;
     }
 
     protected Object defaultValue(Parameter parameter, AnnotatedType parameterType, DefaultValueProvider defaultValueProvider, GlobalEnvironment environment) {

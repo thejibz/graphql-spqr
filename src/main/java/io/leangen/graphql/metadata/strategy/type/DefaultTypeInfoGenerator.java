@@ -13,6 +13,7 @@ import java.lang.reflect.AnnotatedType;
 import java.util.Arrays;
 import java.util.Optional;
 import java.util.function.Supplier;
+import org.eclipse.microprofile.graphql.Description;
 
 /**
  * @author Bojan Tomic (kaqqao)
@@ -35,8 +36,8 @@ public class DefaultTypeInfoGenerator implements TypeInfoGenerator {
     @Override
     @SuppressWarnings("unchecked")
     public String generateTypeDescription(AnnotatedType type, MessageBundle messageBundle) {
-        return Optional.ofNullable(type.getAnnotation(Type.class))
-                .map(ann -> messageBundle.interpolate(ann.description()))
+        return Optional.ofNullable(type.getAnnotation(Description.class))
+                .map(ann -> messageBundle.interpolate(ann.value()))
                 .orElse("");
     }
 
@@ -50,8 +51,8 @@ public class DefaultTypeInfoGenerator implements TypeInfoGenerator {
 
     @Override
     public String generateInputTypeDescription(AnnotatedType type, MessageBundle messageBundle) {
-        return Optional.ofNullable(type.getAnnotation(InputType.class))
-                .map(ann -> messageBundle.interpolate(ann.description()))
+        return Optional.ofNullable(type.getAnnotation(Description.class))
+                .map(ann -> messageBundle.interpolate(ann.value()))
                 .orElse(generateTypeDescription(type, messageBundle));
     }
 

@@ -4,6 +4,7 @@ import io.leangen.graphql.util.Utils;
 import org.eclipse.microprofile.graphql.InputField;
 
 import java.lang.reflect.Method;
+import org.eclipse.microprofile.graphql.Description;
 
 public class AnnotationMappingUtils {
 
@@ -15,6 +16,6 @@ public class AnnotationMappingUtils {
     }
 
     public static String inputFieldDescription(Method method) {
-        return method.isAnnotationPresent(InputField.class) ? method.getAnnotation(InputField.class).description() : "";
+        return method.isAnnotationPresent(Description.class) ? method.getAnnotation(Description.class).value() : "";
     }
 }

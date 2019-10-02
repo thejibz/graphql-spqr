@@ -25,6 +25,7 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import org.eclipse.microprofile.graphql.Description;
 
 /**
  * A resolver builder that exposes only the methods explicitly annotated with {@link Query}
@@ -50,7 +51,7 @@ public class AnnotatedResolverBuilder extends FilteredResolverBuilder {
                 .map(field -> new Resolver(
                         operationNameGenerator.generateQueryName(
                                 new OperationNameGeneratorParams<>(field, beanType, params.getQuerySourceBean(), messageBundle)),
-                        messageBundle.interpolate(field.getAnnotation(Query.class).description()),
+                        messageBundle.interpolate(field.getAnnotation(Description.class).value()),
                         deprecationReason(field, messageBundle),
                         false,
                         new FieldAccessor(field, beanType),
@@ -94,15 +95,10 @@ public class AnnotatedResolverBuilder extends FilteredResolverBuilder {
     }
 
     private String description(Annotation annotation, MessageBundle messageBundle) {
-        if (annotation instanceof Query) {
-            return messageBundle.interpolate(((Query) annotation).description());
+        if (annotation instanceof Description) {
+            return messageBundle.interpolate(((Description) annotation).value());
         }
-        if (annotation instanceof Mutation) {
-            return messageBundle.interpolate(((Mutation) annotation).description());
-        }
-        if (annotation instanceof Subscription) {
-            return messageBundle.interpolate(((Subscription) annotation).description());
-        }
+        
         throw new IllegalArgumentException("Invalid operation annotations " + annotation);
     }
 
