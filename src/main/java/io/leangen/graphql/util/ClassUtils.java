@@ -413,11 +413,52 @@ public class ClassUtils {
         return element.toString();
     }
 
-    public static boolean hasAnnotation(AnnotatedElement element, Class<? extends Annotation> annotation) {
-        return element.isAnnotationPresent(annotation) || Arrays.stream(element.getAnnotations())
-                .anyMatch(ann -> ann.annotationType().isAnnotationPresent(annotation));
+    public static boolean hasAnnotation(AnnotatedElement element, Class<? extends Annotation>... annotation) {
+        
+        for(Class<? extends Annotation> a:annotation){
+            if(element.isAnnotationPresent(a) || Arrays.stream(element.getAnnotations())
+                .anyMatch(ann -> ann.annotationType().isAnnotationPresent(a)))return true;
+        }
+        return false;
     }
 
+    public static boolean hasAnnotationOnGetter(AnnotatedElement element, Class<? extends Annotation>... annotation) {
+        if (element instanceof Field) {
+            Field field = (Field) element;
+            Class<?> declaringClass = field.getDeclaringClass();
+            String fieldName = field.getName();
+            Class<?> fieldType = field.getType();
+            String getterName = Boolean.class.isAssignableFrom(fieldType) ? "is" : "get" + fieldName.substring(0,1).toUpperCase() + fieldName.substring(1);
+            try {
+                Method getter = declaringClass.getMethod(getterName, fieldType);
+                return ClassUtils.hasAnnotation(getter, annotation);
+            } catch (NoSuchMethodException nsme) {
+                return false;
+            }
+
+        }
+        return false;
+    }
+
+    public static boolean hasAnnotationOnSetter(AnnotatedElement element, Class<? extends Annotation>... annotation) {
+        if (element instanceof Field) {
+            Field field = (Field) element;
+            Class<?> declaringClass = field.getDeclaringClass();
+            String fieldName = field.getName();
+            Class<?> fieldType = field.getType();
+            String setterName = "set" + fieldName.substring(0,1).toUpperCase() + fieldName.substring(1);
+            try {
+                Method setter = declaringClass.getMethod(setterName, fieldType);
+                return ClassUtils.hasAnnotation(setter, annotation);
+            } catch (NoSuchMethodException nsme) {
+                return false;
+            }
+
+        }
+        return false;
+    }
+    
+    
     public static List<Method> getAnnotationFields(Class<? extends Annotation> annotation) {
         return Arrays.stream(annotation.getMethods())
                 .filter(method -> annotation.equals(method.getDeclaringClass()))
