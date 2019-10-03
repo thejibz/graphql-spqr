@@ -25,7 +25,8 @@ public class UnionTypeMapper extends UnionMapper {
     public GraphQLOutputType toGraphQLType(AnnotatedType javaType, OperationMapper operationMapper, Set<Class<? extends TypeMapper>> mappersToSkip, BuildContext buildContext) {
         GraphQLUnion annotation = javaType.getAnnotation(GraphQLUnion.class);
         List<AnnotatedType> possibleJavaTypes = getPossibleJavaTypes(javaType, buildContext);
-        return toGraphQLUnion(annotation.name(), annotation.description(), javaType, possibleJavaTypes, operationMapper, buildContext);
+        final String name = buildContext.typeInfoGenerator.generateTypeName(javaType, buildContext.messageBundle);
+        return toGraphQLUnion(name, annotation.description(), javaType, possibleJavaTypes, operationMapper, buildContext);
     }
 
     @Override
@@ -50,8 +51,8 @@ public class UnionTypeMapper extends UnionMapper {
                         " must have a public default constructor", e);
             }
         }
-        if (possibleTypes.isEmpty() && annotation.possibleTypeAutoDiscovery()) {
-            possibleTypes = buildContext.implDiscoveryStrategy.findImplementations(javaType, annotation.scanPackages(), buildContext);
+        if (possibleTypes.isEmpty()) {
+            possibleTypes = buildContext.implDiscoveryStrategy.findImplementations(javaType, annotation.possibleTypeAutoDiscovery(), annotation.scanPackages(), buildContext);
         }
         if (possibleTypes.isEmpty()) {
             throw new TypeMappingException("No possible types found for union type " + javaType.getType().getTypeName());

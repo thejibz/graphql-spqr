@@ -24,7 +24,6 @@ import org.reactivestreams.Subscription;
 
 import java.lang.reflect.AnnotatedType;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -81,7 +80,7 @@ public class PublisherAdapter<T> extends AbstractTypeSubstitutingMapper implemen
 
     @Override
     public boolean supports(AnnotatedType type) {
-        return GenericTypeReflector.isSuperType(Publisher.class, type.getType());
+        return ClassUtils.isSuperClass(Publisher.class, type);
     }
 
     private <R> CompletableFuture<DataFetcherResult<List<R>>> collect(Publisher<R> publisher, ExecutionStepInfo step) {
@@ -103,13 +102,16 @@ public class PublisherAdapter<T> extends AbstractTypeSubstitutingMapper implemen
 
             @Override
             public void onError(Throwable error) {
-                ExceptionWhileDataFetching wrapped = new ExceptionWhileDataFetching(step.getPath(), error, step.getField().getSourceLocation());
-                promise.complete(new DataFetcherResult<>(buffer, Collections.singletonList(wrapped)));
+                ExceptionWhileDataFetching wrapped = new ExceptionWhileDataFetching(step.getPath(), error, step.getField().getSingleField().getSourceLocation());
+                promise.complete(DataFetcherResult.<List<R>>newResult()
+                        .data(buffer)
+                        .error(wrapped)
+                        .build());
             }
 
             @Override
             public void onComplete() {
-                promise.complete(new DataFetcherResult<>(buffer, Collections.emptyList()));
+                promise.complete(DataFetcherResult.<List<R>>newResult().data(buffer).build());
             }
         }));
         return promise;

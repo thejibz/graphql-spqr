@@ -5,6 +5,7 @@ import io.leangen.geantyref.GenericTypeReflector;
 import io.leangen.graphql.annotations.types.GraphQLDirective;
 import io.leangen.graphql.metadata.Directive;
 import io.leangen.graphql.metadata.DirectiveArgument;
+import io.leangen.graphql.metadata.TypedElement;
 import io.leangen.graphql.metadata.messages.MessageBundle;
 import io.leangen.graphql.metadata.strategy.type.TypeInfoGenerator;
 import io.leangen.graphql.metadata.strategy.value.AnnotationMappingUtils;
@@ -82,15 +83,15 @@ public class AnnotatedDirectiveBuilder implements DirectiveBuilder {
         InputFieldBuilderParams fieldBuilderParams = InputFieldBuilderParams.builder()
                 .withType(directiveType)
                 .withEnvironment(params.getEnvironment())
+                .withConcreteSubTypes(params.getConcreteSubTypes())
                 .build();
         List<DirectiveArgument> arguments = params.getInputFieldBuilders().getInputFields(fieldBuilderParams).stream()
                 .map(inputField -> new DirectiveArgument(
                         inputField.getName(),
                         inputField.getDescription(),
-                        inputField.getJavaType(),
+                        inputField.getTypedElement(),
                         null,
                         inputField.getDefaultValue(),
-                        inputField.getTypedElement().getElement(),
                         null))
                 .collect(Collectors.toList());
 
@@ -126,8 +127,9 @@ public class AnnotatedDirectiveBuilder implements DirectiveBuilder {
 
     private DirectiveArgument buildDirectiveArgument(Annotation annotation, Method method) {
         try {
+            TypedElement element = new TypedElement(GenericTypeReflector.annotate(method.getReturnType()), method);
             return new DirectiveArgument(AnnotationMappingUtils.inputFieldName(method), AnnotationMappingUtils.inputFieldDescription(method),
-                    GenericTypeReflector.annotate(method.getReturnType()), method.invoke(annotation), method.getDefaultValue(), method, annotation);
+                    element, method.invoke(annotation), method.getDefaultValue(), annotation);
         } catch (ReflectiveOperationException e) {
             throw new RuntimeException(e);
         }

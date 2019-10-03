@@ -1,6 +1,6 @@
 package io.leangen.graphql.generator.mapping.strategy;
 
-import io.leangen.graphql.annotations.types.Interface;
+import io.leangen.graphql.annotations.types.GraphQLInterface;
 
 import java.lang.reflect.AnnotatedType;
 
@@ -9,12 +9,8 @@ import java.lang.reflect.AnnotatedType;
  */
 public class AnnotatedInterfaceStrategy extends AbstractInterfaceMappingStrategy {
 
-    public AnnotatedInterfaceStrategy(boolean mapClasses) {
-        super(mapClasses);
-    }
-
     @Override
-    public boolean supportsInterface(AnnotatedType interfase) {
-        return interfase.isAnnotationPresent(Interface.class);
+    public boolean supportsInterface(AnnotatedType inter) {
+        return inter.isAnnotationPresent(GraphQLInterface.class);
     }
 }

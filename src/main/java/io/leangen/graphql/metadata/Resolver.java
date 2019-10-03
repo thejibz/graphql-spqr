@@ -8,7 +8,6 @@ import io.leangen.graphql.util.Utils;
 import java.lang.reflect.AnnotatedType;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Type;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -28,26 +27,26 @@ public class Resolver {
     private final String operationDescription;
     private final String operationDeprecationReason;
     private final List<OperationArgument> arguments;
-    private final AnnotatedType returnType;
+    private final TypedElement typedElement;
     private final Set<OperationArgument> contextArguments;
     private final String complexityExpression;
     private final Executable executable;
     private final boolean batched;
 
     public Resolver(String operationName, String operationDescription, String operationDeprecationReason, boolean batched,
-                    Executable executable, AnnotatedType returnType, List<OperationArgument> arguments, String complexityExpression) {
+                    Executable executable, TypedElement typedElement, List<OperationArgument> arguments, String complexityExpression) {
 
         Set<OperationArgument> contextArguments = resolveContexts(arguments);
         
         if (batched) {
-            validateBatching(executable.toString(), returnType, contextArguments);
+            validateBatching(executable.toString(), typedElement.getJavaType(), contextArguments);
         }
         
         this.operationName = validateName(operationName, executable);
         this.operationDescription = operationDescription;
         this.operationDeprecationReason = operationDeprecationReason;
         this.arguments = arguments;
-        this.returnType = returnType;
+        this.typedElement = typedElement;
         this.contextArguments = contextArguments;
         this.complexityExpression = complexityExpression;
         this.executable = executable;
@@ -95,7 +94,6 @@ public class Resolver {
      * @throws InvocationTargetException If a reflective invocation of the underlying method/field fails
      * @throws IllegalAccessException If a reflective invocation of the underlying method/field is not allowed
      */
-    @SuppressWarnings("unchecked")
     public Object resolve(Object source, Object[] args) throws InvocationTargetException, IllegalAccessException {
         return executable.execute(source, args);
     }
@@ -133,19 +131,26 @@ public class Resolver {
      *
      * @return The unique "fingerprint" string identifying this resolver
      */
-    public Set<String> getFingerprints() {
-        Set<String> fingerprints = new HashSet<>(contextArguments.size() + 1);
-        contextArguments.forEach(context -> fingerprints.add(fingerprint(context)));
-        fingerprints.add(fingerprint(null));
-        return fingerprints;
+    String getFingerprint() {
+        StringBuilder fingerprint = new StringBuilder();
+        arguments.stream()
+                .filter(OperationArgument::isMappable)
+                .map(OperationArgument::getName)
+                .sorted()
+                .forEach(fingerprint::append);
+        return fingerprint.toString();
     }
 
     public List<OperationArgument> getArguments() {
         return arguments;
     }
 
+    public TypedElement getTypedElement() {
+        return typedElement;
+    }
+
     public AnnotatedType getReturnType() {
-        return returnType;
+        return typedElement.getJavaType();
     }
 
     public String getComplexityExpression() {
@@ -154,17 +159,6 @@ public class Resolver {
 
     public Executable getExecutable() {
         return executable;
-    }
-
-    private String fingerprint(OperationArgument ignoredResolverSource) {
-        StringBuilder fingerprint = new StringBuilder();
-        arguments.stream()
-                .filter(arg -> arg != ignoredResolverSource)
-                .filter(OperationArgument::isMappable)
-                .map(OperationArgument::getName)
-                .sorted()
-                .forEach(fingerprint::append);
-        return fingerprint.toString();
     }
 
     @Override

@@ -4,7 +4,7 @@ import io.github.classgraph.ClassGraph;
 import io.github.classgraph.ClassInfo;
 import io.github.classgraph.ScanResult;
 import io.leangen.geantyref.GenericTypeReflector;
-import io.leangen.graphql.annotations.Ignore;
+import io.leangen.graphql.annotations.GraphQLIgnore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,7 +29,7 @@ public class ClassFinder {
     public final static Predicate<ClassInfo> CONCRETE = info -> !info.isAbstract() && !info.isInterface();
 
     public final static Predicate<ClassInfo> NON_IGNORED = info ->
-            info.getAnnotations().stream().noneMatch(ann -> ann.getName().equals(Ignore.class.getName()));
+            info.getAnnotations().directOnly().stream().noneMatch(ann -> ann.getName().equals(GraphQLIgnore.class.getName()));
 
     public final static Predicate<ClassInfo> PUBLIC = ClassInfo::isPublic;
 
@@ -47,11 +47,11 @@ public class ClassFinder {
      *
      * @return A collection of {@link AnnotatedType}s discovered that implementation/extend {@code superType}
      */
-    @SuppressWarnings("WeakerAccess")
-    public List<AnnotatedType> findImplementations(AnnotatedType superType, Predicate<ClassInfo> filter, String... packages) {
+    public List<AnnotatedType> findImplementations(AnnotatedType superType, Predicate<ClassInfo> filter,
+                                                   boolean allowMissingGenerics, String... packages) {
         Class<?> rawType = ClassUtils.getRawType(superType.getType());
         return findImplementations(rawType, filter, packages).stream()
-                .flatMap(raw -> ClassFinder.getExactSubType(superType, raw))
+                .flatMap(raw -> ClassFinder.getExactSubType(superType, raw, allowMissingGenerics))
                 .collect(Collectors.toList());
     }
 
@@ -84,14 +84,15 @@ public class ClassFinder {
         }
     }
 
-    private static Stream<AnnotatedType> getExactSubType(AnnotatedType superType, Class<?> subClass) {
+    private static Stream<AnnotatedType> getExactSubType(AnnotatedType superType, Class<?> subClass, boolean allowMissingGenerics) {
         AnnotatedType subType = GenericTypeReflector.getExactSubType(superType, subClass);
-        if (subType != null) {
-            return Stream.of(subType);
+        if (subType == null || (!allowMissingGenerics && ClassUtils.isMissingTypeParameters(subType.getType()))) {
+            log.warn("Auto discovered type " + subClass.getName() + " will be ignored " +
+                    "because the exact matching sub type of " + ClassUtils.toString(superType) + " could not be determined");
+            return Stream.empty();
         }
-        log.warn("Auto discovered type " + subClass.getName() + " will be ignored " +
-                "because the exact matching sub type of " + ClassUtils.toString(superType) + " could not be determined");
-        return Stream.empty();
+
+        return Stream.of(subType);
     }
 
     private static Stream<Class<?>> loadClass(ClassInfo classInfo, Class superType) {

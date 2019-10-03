@@ -1,6 +1,6 @@
 package io.leangen.graphql.execution;
 
-import graphql.analysis.QueryTraversal;
+import graphql.analysis.QueryTraverser;
 import graphql.analysis.QueryVisitorFragmentSpreadEnvironment;
 import graphql.analysis.QueryVisitorInlineFragmentEnvironment;
 import graphql.analysis.QueryVisitorStub;
@@ -35,9 +35,9 @@ public class Directives {
     private static final ValuesResolver valuesResolver = new ValuesResolver();
 
     Directives(DataFetchingEnvironment env, ExecutionStepInfo step) {
-        List<Field> fields = env.getFields();
+        List<Field> fields = env.getMergedField().getFields();
         if (step != null) {
-            fields = step.getField() != null ? Collections.singletonList(step.getField()) : Collections.emptyList();
+            fields = step.getField() != null ? step.getField().getFields() : Collections.emptyList();
         }
         step = step != null ? step : env.getExecutionStepInfo();
         // Field directives
@@ -50,8 +50,26 @@ public class Directives {
                 }));
 
         // Operation directives
-        Map<String, List<Map<String, Object>>> operationDirectives = parseDirectives(env.getExecutionContext().getOperationDefinition().getDirectives(), env);
-        if (OperationDefinition.Operation.MUTATION.equals(env.getExecutionContext().getOperationDefinition().getOperation())) {
+        Map<String, List<Map<String, Object>>> operationDirectives = parseDirectives(env.getOperationDefinition().getDirectives(), env);
+
+        switch (env.getOperationDefinition().getOperation()) {
+            case QUERY:
+                directives.put(Introspection.DirectiveLocation.QUERY, operationDirectives);
+                directives.put(Introspection.DirectiveLocation.MUTATION, Collections.emptyMap());
+                directives.put(Introspection.DirectiveLocation.SUBSCRIPTION, Collections.emptyMap());
+                break;
+            case MUTATION:
+                directives.put(Introspection.DirectiveLocation.MUTATION, operationDirectives);
+                directives.put(Introspection.DirectiveLocation.QUERY, Collections.emptyMap());
+                directives.put(Introspection.DirectiveLocation.SUBSCRIPTION, Collections.emptyMap());
+                break;
+            case SUBSCRIPTION:
+                directives.put(Introspection.DirectiveLocation.SUBSCRIPTION, operationDirectives);
+                directives.put(Introspection.DirectiveLocation.QUERY, Collections.emptyMap());
+                directives.put(Introspection.DirectiveLocation.MUTATION, Collections.emptyMap());
+                break;
+        }
+        if (OperationDefinition.Operation.MUTATION.equals(env.getOperationDefinition().getOperation())) {
             directives.put(Introspection.DirectiveLocation.MUTATION, operationDirectives);
             directives.put(Introspection.DirectiveLocation.QUERY, Collections.emptyMap());
         } else {
@@ -78,16 +96,16 @@ public class Directives {
     }
 
     private Map<String, Object> parseDirective(Directive dir, DataFetchingEnvironment env) {
-        GraphQLDirective directive = env.getExecutionContext().getGraphQLSchema().getDirective(dir.getName());
+        GraphQLDirective directive = env.getGraphQLSchema().getDirective(dir.getName());
         if (directive == null) {
             return null;
         }
         return Collections.unmodifiableMap(
-                valuesResolver.getArgumentValues(env.getGraphQLSchema().getFieldVisibility(), directive.getArguments(),
-                        dir.getArguments(), env.getExecutionContext().getVariables()));
+                valuesResolver.getArgumentValues(env.getGraphQLSchema().getCodeRegistry(), directive.getArguments(),
+                        dir.getArguments(), env.getVariables()));
     }
 
-    Map<Introspection.DirectiveLocation, Map<String, List<Map<String, Object>>>>  getDirectives() {
+    Map<Introspection.DirectiveLocation, Map<String, List<Map<String, Object>>>> getDirectives() {
         return directives;
     }
 
@@ -107,7 +125,7 @@ public class Directives {
             this.inlineFragmentDirs = new ArrayList<>();
             this.fragmentDirs = new ArrayList<>();
             this.fragmentDefDirs = new ArrayList<>();
-            this.fieldsToFind = env.getFields();
+            this.fieldsToFind = env.getMergedField().getFields();
             this.relevantFragments = new HashSet<>();
         }
 
@@ -123,11 +141,11 @@ public class Directives {
                 rootStep = rootStep.getParent();
                 rootParentType = GraphQLUtils.unwrapNonNull(rootStep.getType());
             }
-            QueryTraversal traversal = QueryTraversal.newQueryTraversal()
-                    .fragmentsByName(env.getExecutionContext().getFragmentsByName())
+            QueryTraverser traversal = QueryTraverser.newQueryTraverser()
+                    .fragmentsByName(env.getFragmentsByName())
                     .schema(env.getGraphQLSchema())
-                    .variables(env.getExecutionContext().getVariables())
-                    .root(env.getExecutionStepInfo().getParent().getField())
+                    .variables(env.getVariables())
+                    .root(env.getExecutionStepInfo().getParent().getField().getSingleField())
                     .rootParentType((GraphQLObjectType) rootParentType)
                     .build();
             traversal.visitPostOrder(fragmentDirectiveCollector);
@@ -138,6 +156,7 @@ public class Directives {
         public void visitInlineFragment(QueryVisitorInlineFragmentEnvironment env) {
             InlineFragment fragment = env.getInlineFragment();
             boolean containsField = fieldsToFind.stream().anyMatch(field -> fragment.getSelectionSet().getSelections().contains(field));
+            @SuppressWarnings("SuspiciousMethodCalls")
             boolean isRelevant = containsField || relevantFragments.stream().anyMatch(frag -> fragment.getSelectionSet().getSelections().contains(frag));
             if (isRelevant) {
                 relevantFragments.add(fragment);
@@ -149,6 +168,7 @@ public class Directives {
         public void visitFragmentSpread(QueryVisitorFragmentSpreadEnvironment env) {
             boolean containsField = fieldsToFind.stream()
                     .anyMatch(field -> env.getFragmentDefinition().getSelectionSet().getSelections().contains(field));
+            @SuppressWarnings("SuspiciousMethodCalls")
             boolean isRelevant = containsField || relevantFragments.stream().anyMatch(frag -> env.getFragmentDefinition().getSelectionSet().getSelections().contains(frag));
             if (isRelevant) {
                 relevantFragments.add(env.getFragmentSpread());

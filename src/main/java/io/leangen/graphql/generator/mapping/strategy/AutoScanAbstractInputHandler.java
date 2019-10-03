@@ -61,7 +61,7 @@ public class AutoScanAbstractInputHandler implements AbstractInputHandler {
             return findConstituentAbstractTypes(((AnnotatedArrayType) javaType).getAnnotatedGenericComponentType(), buildContext);
         }
         if (javaType instanceof AnnotatedWildcardType || javaType instanceof AnnotatedTypeVariable) {
-            throw new TypeMappingException(javaType.getType());
+            throw TypeMappingException.ambiguousType(javaType.getType());
         }
         return findAbstract(javaType, buildContext);
     }
@@ -96,15 +96,18 @@ public class AutoScanAbstractInputHandler implements AbstractInputHandler {
         }
         abstractComponents.put(javaType.getType(), null);
         Set<Type> abstractTypes = new HashSet<>();
+        List<Class<?>> concreteSubTypes = Collections.emptyList();
         if (ClassUtils.isAbstract(javaType)) {
             abstractTypes.add(javaType.getType());
+            concreteSubTypes = findConcreteSubTypes(ClassUtils.getRawType(javaType.getType()), buildContext);
         }
         buildContext.inputFieldBuilders.getInputFields(
                 InputFieldBuilderParams.builder()
                         .withType(javaType)
                         .withEnvironment(buildContext.globalEnvironment)
+                        .withConcreteSubTypes(concreteSubTypes)
                         .build())
-                .forEach(childQuery -> abstractTypes.addAll(findConstituentAbstractTypes(childQuery.getDeserializableType(), buildContext)));
+                .forEach(inputField -> abstractTypes.addAll(findConstituentAbstractTypes(inputField.getDeserializableType(), buildContext)));
         abstractComponents.put(javaType.getType(), abstractTypes);
         return abstractTypes;
     }

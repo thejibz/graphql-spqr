@@ -33,6 +33,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
+import java.time.OffsetTime;
 import java.time.Period;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
@@ -264,7 +265,7 @@ public class Scalars {
             s -> Time.valueOf(LocalTime.parse(s)), i -> Time.valueOf(i.atZone(ZoneOffset.UTC).toLocalTime()), t -> t.toLocalTime().toString());
 
     public static final GraphQLScalarType GraphQLSqlTimestamp = temporalScalar(Timestamp.class,"SqlTimestamp", "a SQL compliant local date-time",
-            s -> Timestamp.valueOf(LocalDateTime.parse(s)), i -> Timestamp.valueOf(i.atZone(ZoneOffset.UTC).toLocalDateTime()), t -> t.toLocalDateTime().toString());
+            s -> Timestamp.from(Instant.parse(s)), Timestamp::from, t -> t.toInstant().toString());
 
     public static final GraphQLScalarType GraphQLCalendar = temporalScalar(Calendar.class,"Calendar", "a date-time with a time-zone",
             s -> GregorianCalendar.from(ZonedDateTime.parse(s)), i -> GregorianCalendar.from(i.atZone(ZoneOffset.UTC)), c -> c.toInstant().toString());
@@ -283,6 +284,9 @@ public class Scalars {
 
     public static final GraphQLScalarType GraphQLZonedDateTime = temporalScalar(ZonedDateTime.class, "ZonedDateTime", "a date-time with a time-zone",
             ZonedDateTime::parse, i -> i.atZone(ZoneOffset.UTC));
+
+    public static final GraphQLScalarType GraphQLOffsetTime = temporalScalar(OffsetTime.class, "OffsetTime", "a time with a UTC offset",
+            OffsetTime::parse, i -> OffsetTime.ofInstant(i, ZoneOffset.UTC));
 
     public static final GraphQLScalarType GraphQLOffsetDateTime = temporalScalar(OffsetDateTime.class, "OffsetDateTime", "a date-time with a UTC offset",
             OffsetDateTime::parse, i -> i.atOffset(ZoneOffset.UTC));
@@ -406,11 +410,11 @@ public class Scalars {
         throw new CoercingParseLiteralException("Unknown scalar AST type: " + value.getClass().getName());
     }
 
-    public static <T> GraphQLScalarType temporalScalar(Class<?> type, String name, String description, ThrowingFunction<String, T> fromString, ThrowingFunction<Instant, T> fromDate) {
+    public static <T> GraphQLScalarType temporalScalar(Class<T> type, String name, String description, ThrowingFunction<String, T> fromString, ThrowingFunction<Instant, T> fromDate) {
         return temporalScalar(type, name, description, fromString, fromDate, Object::toString);
     }
 
-    public static <T> GraphQLScalarType temporalScalar(Class<?> type, String name, String description, ThrowingFunction<String, T> fromString, ThrowingFunction<Instant, T> fromDate, ThrowingFunction<T, String> toString) {
+    public static <T> GraphQLScalarType temporalScalar(Class<T> type, String name, String description, ThrowingFunction<String, T> fromString, ThrowingFunction<Instant, T> fromDate, ThrowingFunction<T, String> toString) {
         return new GraphQLScalarType(name, "Built-in scalar representing " + description, new Coercing() {
 
             @Override
@@ -535,6 +539,7 @@ public class Scalars {
         scalarMapping.put(LocalTime.class, GraphQLLocalTime);
         scalarMapping.put(LocalDateTime.class, GraphQLLocalDateTime);
         scalarMapping.put(ZonedDateTime.class, GraphQLZonedDateTime);
+        scalarMapping.put(OffsetTime.class, GraphQLOffsetTime);
         scalarMapping.put(OffsetDateTime.class, GraphQLOffsetDateTime);
         scalarMapping.put(Duration.class, GraphQLDurationScalar);
         scalarMapping.put(Period.class, GraphQLPeriodScalar);

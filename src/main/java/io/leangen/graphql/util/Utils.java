@@ -2,9 +2,11 @@ package io.leangen.graphql.util;
 
 import java.lang.reflect.Array;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
@@ -24,6 +26,11 @@ public class Utils {
     @SuppressWarnings("OptionalUsedAsFieldOrParameterType")
     public static <T> Optional<T> or(Optional<T> left, Supplier<Optional<T>> right) {
         return left.isPresent() ? left : right.get();
+    }
+
+    @SafeVarargs
+    public static <T> Stream<T> flatten(Optional<? extends T>... optionals) {
+        return Arrays.stream(optionals).filter(Optional::isPresent).map(Optional::get);
     }
 
     public static boolean isEmpty(String string) {
@@ -63,9 +70,23 @@ public class Utils {
         return array != null && Array.getLength(array) != 0;
     }
 
+    public static int indexOf(String[] strings, String element, int missingIndex) {
+        requireNonEmpty(element);
+        for (int i = 0; i < strings.length; i++) {
+            if (strings[i].equals(element)) {
+                return i;
+            }
+        }
+        return missingIndex;
+    }
+
     @SafeVarargs
     public static <T> Stream<T> concat(Stream<T>... streams) {
         return Arrays.stream(streams).reduce(Stream::concat).orElse(Stream.empty());
+    }
+
+    public static <T> Stream<T> extractInstances(Collection<?> collection, Class<T> clazz) {
+        return collection.stream().filter(clazz::isInstance).map(clazz::cast);
     }
 
     public static String[] emptyArray() {
@@ -85,5 +106,13 @@ public class Utils {
 
     public static <T> List<T> singletonList(T element) {
         return element == null ? Collections.emptyList() : Collections.singletonList(element);
+    }
+
+    public static <T> List<T> asList(T[] elements) {
+        return elements == null || elements.length == 0 ? Collections.emptyList() : Arrays.asList(elements);
+    }
+
+    public static <T> Predicate<T> acceptAll() {
+        return x -> true;
     }
 }

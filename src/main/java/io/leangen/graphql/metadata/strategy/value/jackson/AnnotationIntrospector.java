@@ -13,7 +13,7 @@ import com.fasterxml.jackson.databind.introspect.JacksonAnnotationIntrospector;
 import com.fasterxml.jackson.databind.jsontype.NamedType;
 import com.fasterxml.jackson.databind.jsontype.TypeResolverBuilder;
 import com.fasterxml.jackson.databind.jsontype.impl.StdTypeResolverBuilder;
-import io.leangen.graphql.annotations.EnumValue;
+import io.leangen.graphql.annotations.GraphQLEnumValue;
 import io.leangen.graphql.metadata.messages.MessageBundle;
 import io.leangen.graphql.metadata.strategy.value.InputFieldInfoGenerator;
 import io.leangen.graphql.metadata.strategy.value.ValueMapper;
@@ -64,6 +64,13 @@ public class AnnotationIntrospector extends JacksonAnnotationIntrospector {
     }
 
     @Override
+    public PropertyName findNameForSerialization(Annotated annotated) {
+        return inputInfoGen.getName(getAnnotatedCandidates(annotated), messageBundle)
+                .map(PropertyName::new)
+                .orElse(super.findNameForSerialization(annotated));
+    }
+
+    @Override
     public String findPropertyDescription(Annotated annotated) {
         return inputInfoGen.getDescription(getAnnotatedCandidates(annotated), messageBundle)
                 .orElse(super.findPropertyDescription(annotated));
@@ -97,9 +104,9 @@ public class AnnotationIntrospector extends JacksonAnnotationIntrospector {
     public String[] findEnumValues(Class<?> enumType, Enum<?>[] enumValues, String[] defaultNames) {
         String[] jacksonNames = super.findEnumValues(enumType, enumValues, defaultNames);
         for (int i = 0; i < enumValues.length; i++) {
-            EnumValue annotation = ClassUtils.getEnumConstantField(enumValues[i]).getAnnotation(EnumValue.class);
-            if (annotation != null && Utils.isNotEmpty(annotation.value())) {
-                jacksonNames[i] = messageBundle.interpolate(annotation.value());
+            GraphQLEnumValue annotation = ClassUtils.getEnumConstantField(enumValues[i]).getAnnotation(GraphQLEnumValue.class);
+            if (annotation != null && Utils.isNotEmpty(annotation.name())) {
+                jacksonNames[i] = messageBundle.interpolate(annotation.name());
             }
         }
         return jacksonNames;
@@ -134,7 +141,7 @@ public class AnnotationIntrospector extends JacksonAnnotationIntrospector {
                 log.warn("Introspection of {} failed. GraphQL input fields might be incorrectly mapped.",
                         setter.getDeclaringClass());
             }
-            if (propertyElements.isEmpty() && ClassUtils.isGetter(setter)) {
+            if (propertyElements.isEmpty()) {
                 propertyElements.add(setter);
             }
         }

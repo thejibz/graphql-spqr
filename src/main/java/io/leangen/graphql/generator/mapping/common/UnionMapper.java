@@ -12,6 +12,7 @@ import io.leangen.graphql.metadata.exceptions.TypeMappingException;
 import io.leangen.graphql.util.Directives;
 
 import java.lang.reflect.AnnotatedType;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -32,30 +33,35 @@ public abstract class UnionMapper implements TypeMapper {
         buildContext.typeCache.register(name);
         GraphQLUnionType.Builder builder = newUnionType()
                 .name(name)
-                .description(description)
-                .typeResolver(buildContext.typeResolver);
+                .description(description);
 
-        possibleJavaTypes.stream()
-                .map(pos -> operationMapper.toGraphQLType(pos, buildContext))
-                .forEach(type -> {
-                    if (type instanceof GraphQLObjectType) {
-                        builder.possibleType((GraphQLObjectType) type);
-                    } else if (type instanceof GraphQLTypeReference) {
-                        builder.possibleType((GraphQLTypeReference) type);
-                    } else {
-                        throw new TypeMappingException(type.getClass().getSimpleName() +
-                                " is not a valid GraphQL union member. Only object types can be unionized.");
-                    }
-                });
+        Set<String> seen = new HashSet<>(possibleJavaTypes.size());
+
+        possibleJavaTypes.forEach(possibleJavaType -> {
+            GraphQLOutputType possibleType = operationMapper.toGraphQLType(possibleJavaType, buildContext);
+            if (!seen.add(possibleType.getName())) {
+                throw new TypeMappingException("Duplicate possible type " + possibleType.getName() + " for union " + name);
+            }
+
+            if (possibleType instanceof GraphQLObjectType) {
+                builder.possibleType((GraphQLObjectType) possibleType);
+            } else if (possibleType instanceof GraphQLTypeReference) {
+                builder.possibleType((GraphQLTypeReference) possibleType);
+            } else {
+                throw new TypeMappingException(possibleType.getClass().getSimpleName() +
+                        " is not a valid GraphQL union member. Only object types can be unionized.");
+            }
+
+            buildContext.typeRegistry.registerCovariantType(name, possibleJavaType, possibleType);
+        });
 
         builder.withDirective(Directives.mappedType(javaType));
         buildContext.directiveBuilder.buildUnionTypeDirectives(javaType, buildContext.directiveBuilderParams()).forEach(directive ->
                 builder.withDirective(operationMapper.toGraphQLDirective(directive, buildContext)));
+        builder.comparatorRegistry(buildContext.comparatorRegistry(javaType));
 
         GraphQLUnionType union = builder.build();
-        for (int i = 0; i < possibleJavaTypes.size(); i++) {
-            buildContext.typeRegistry.registerCovariantType(union.getName(), possibleJavaTypes.get(i), union.getTypes().get(i));
-        }
+        buildContext.codeRegistry.typeResolver(union, buildContext.typeResolver);
         return union;
     }
 

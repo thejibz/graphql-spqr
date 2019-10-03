@@ -1,8 +1,10 @@
 package io.leangen.graphql.generator;
 
 import graphql.relay.Relay;
+import graphql.schema.GraphQLCodeRegistry;
 import graphql.schema.GraphQLInterfaceType;
 import graphql.schema.GraphQLType;
+import graphql.schema.GraphqlTypeComparatorRegistry;
 import graphql.schema.TypeResolver;
 import io.leangen.graphql.execution.GlobalEnvironment;
 import io.leangen.graphql.execution.ResolverInterceptorFactory;
@@ -65,6 +67,7 @@ public class BuildContext {
     public final ClassFinder classFinder;
     public final List<Consumer<BuildContext>> postBuildHooks;
     public final List<AnnotatedType> additionalDirectives;
+    public final GraphQLCodeRegistry.Builder codeRegistry;
 
     final Validator validator;
 
@@ -91,9 +94,10 @@ public class BuildContext {
                         TypeMapperRegistry typeMappers, SchemaTransformerRegistry transformers, ValueMapperFactory valueMapperFactory,
                         TypeInfoGenerator typeInfoGenerator, MessageBundle messageBundle, InterfaceMappingStrategy interfaceStrategy,
                         ScalarDeserializationStrategy scalarStrategy, TypeTransformer typeTransformer, AbstractInputHandler abstractInputHandler,
-                        InputFieldBuilderRegistry inputFieldBuilders, ResolverInterceptorFactory interceptorFactory, DirectiveBuilder directiveBuilder,
-                        InclusionStrategy inclusionStrategy, RelayMappingConfig relayMappingConfig, Collection<GraphQLType> knownTypes, List<AnnotatedType> additionalDirectives,
-                        Comparator<AnnotatedType> typeComparator, ImplementationDiscoveryStrategy implementationStrategy) {
+                        InputFieldBuilderRegistry inputFieldBuilders, ResolverInterceptorFactory interceptorFactory,
+                        DirectiveBuilder directiveBuilder, InclusionStrategy inclusionStrategy, RelayMappingConfig relayMappingConfig,
+                        Collection<GraphQLType> knownTypes, List<AnnotatedType> additionalDirectives, Comparator<AnnotatedType> typeComparator,
+                        ImplementationDiscoveryStrategy implementationStrategy, GraphQLCodeRegistry.Builder codeRegistry) {
         this.operationRegistry = operationRegistry;
         this.typeRegistry = environment.typeRegistry;
         this.transformers = transformers;
@@ -123,6 +127,7 @@ public class BuildContext {
         this.relayMappingConfig = relayMappingConfig;
         this.classFinder = new ClassFinder();
         this.validator = new Validator(environment, typeMappers, knownTypes, typeComparator);
+        this.codeRegistry = codeRegistry;
         this.postBuildHooks = new ArrayList<>(Collections.singletonList(context -> classFinder.close()));
     }
 
@@ -140,18 +145,27 @@ public class BuildContext {
         return valueMapperFactory.getValueMapper(concreteSubTypes, globalEnvironment);
     }
 
+    public GraphqlTypeComparatorRegistry comparatorRegistry(AnnotatedType type) {
+        return typeInfoGenerator.generateComparatorRegistry(type, messageBundle);
+    }
+
+    public DirectiveBuilderParams directiveBuilderParams() {
+        return directiveBuilderParams(Collections.emptyList());
+    }
+
+    public DirectiveBuilderParams directiveBuilderParams(List<Class<?>> concreteSubTypes) {
+        return DirectiveBuilderParams.builder()
+                .withEnvironment(globalEnvironment)
+                .withInputFieldBuilders(inputFieldBuilders)
+                .withConcreteSubTypes(concreteSubTypes)
+                .build();
+    }
+
     void resolveTypeReferences() {
         typeCache.resolveTypeReferences(typeRegistry);
     }
 
     public void executePostBuildHooks() {
         postBuildHooks.forEach(hook -> hook.accept(this));
-    }
-
-    public DirectiveBuilderParams directiveBuilderParams() {
-        return DirectiveBuilderParams.builder()
-                .withEnvironment(globalEnvironment)
-                .withInputFieldBuilders(inputFieldBuilders)
-                .build();
     }
 }

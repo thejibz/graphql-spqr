@@ -1,24 +1,46 @@
 package io.leangen.graphql.metadata.strategy.type;
 
+import graphql.schema.GraphQLArgument;
+import graphql.schema.GraphQLEnumValueDefinition;
+import graphql.schema.GraphQLFieldDefinition;
+import graphql.schema.GraphQLInputObjectField;
+import graphql.schema.GraphqlTypeComparatorEnvironment;
+import graphql.schema.GraphqlTypeComparatorRegistry;
 import io.leangen.graphql.annotations.types.GraphQLDirective;
+import io.leangen.graphql.annotations.types.GraphQLInterface;
+import io.leangen.graphql.annotations.types.GraphQLType;
+import io.leangen.graphql.annotations.types.GraphQLUnion;
 import io.leangen.graphql.metadata.messages.MessageBundle;
 import io.leangen.graphql.util.ClassUtils;
 import io.leangen.graphql.util.Utils;
-import org.eclipse.microprofile.graphql.InputType;
-import org.eclipse.microprofile.graphql.Type;
 
 import java.beans.Introspector;
 import java.lang.reflect.AnnotatedParameterizedType;
 import java.lang.reflect.AnnotatedType;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.Optional;
 import java.util.function.Supplier;
-import org.eclipse.microprofile.graphql.Description;
+import java.util.stream.Stream;
 
+import org.eclipse.microprofile.graphql.Type;
+import org.eclipse.microprofile.graphql.Description;
 /**
  * @author Bojan Tomic (kaqqao)
  */
 public class DefaultTypeInfoGenerator implements TypeInfoGenerator {
+
+    public static final GraphqlTypeComparatorRegistry DEFAULT_REGISTRY = new GraphqlTypeComparatorRegistry() {
+        @Override
+        public <T extends graphql.schema.GraphQLType> Comparator<? super T> getComparator(GraphqlTypeComparatorEnvironment env) {
+            //Leave the arguments in the declared order
+            if (env.getElementType().equals(GraphQLArgument.class)) {
+                return GraphqlTypeComparatorRegistry.AS_IS_REGISTRY.getComparator(env);
+            }
+            //Sort everything else by name
+            return GraphqlTypeComparatorRegistry.BY_NAME_REGISTRY.getComparator(env);
+        }
+    };
 
     @Override
     public String generateTypeName(AnnotatedType type, MessageBundle messageBundle) {
@@ -26,7 +48,7 @@ public class DefaultTypeInfoGenerator implements TypeInfoGenerator {
             String baseName = generateSimpleName(type, messageBundle);
             StringBuilder genericName = new StringBuilder(baseName);
             Arrays.stream(((AnnotatedParameterizedType) type).getAnnotatedActualTypeArguments())
-                    .map(t -> generateSimpleName(t, messageBundle))
+                    .map(t -> generateTypeName(t, messageBundle))
                     .forEach(argName -> genericName.append("_").append(argName));
             return genericName.toString();
         }
@@ -36,29 +58,17 @@ public class DefaultTypeInfoGenerator implements TypeInfoGenerator {
     @Override
     @SuppressWarnings("unchecked")
     public String generateTypeDescription(AnnotatedType type, MessageBundle messageBundle) {
-        return Optional.ofNullable(type.getAnnotation(Description.class))
-                .map(ann -> messageBundle.interpolate(ann.value()))
-                .orElse("");
-    }
-
-    @Override
-    public String generateInputTypeName(AnnotatedType type, MessageBundle messageBundle) {
-        return Optional.ofNullable(type.getAnnotation(InputType.class))
-                .map(ann -> messageBundle.interpolate(ann.value()))
-                .filter(Utils::isNotEmpty)
-                .orElse(TypeInfoGenerator.super.generateInputTypeName(type, messageBundle));
-    }
-
-    @Override
-    public String generateInputTypeDescription(AnnotatedType type, MessageBundle messageBundle) {
-        return Optional.ofNullable(type.getAnnotation(Description.class))
-                .map(ann -> messageBundle.interpolate(ann.value()))
-                .orElse(generateTypeDescription(type, messageBundle));
-    }
-
-    @Override
-    public String[] getFieldOrder(AnnotatedType type, MessageBundle messageBundle) {
-        return Utils.emptyArray();
+        Optional<String>[] descriptions = new Optional[]{
+                Optional.ofNullable(type.getAnnotation(Description.class))
+                        .map(Description::value),
+                Optional.ofNullable(type.getAnnotation(GraphQLUnion.class))
+                        .map(GraphQLUnion::description),
+                Optional.ofNullable(type.getAnnotation(GraphQLInterface.class))
+                        .map(GraphQLInterface::description),
+                Optional.ofNullable(type.getAnnotation(GraphQLType.class))
+                        .map(GraphQLType::description)
+        };
+        return messageBundle.interpolate(getFirstNonEmptyOrDefault(descriptions, () -> ""));
     }
 
     @Override
@@ -78,12 +88,39 @@ public class DefaultTypeInfoGenerator implements TypeInfoGenerator {
                         .orElse(""));
     }
 
+    @Override
+    public GraphqlTypeComparatorRegistry generateComparatorRegistry(AnnotatedType type, MessageBundle messageBundle) {
+        if (!isOrdered(type)) {
+            return DEFAULT_REGISTRY;
+        }
+        return new GraphqlTypeComparatorRegistry() {
+            @Override
+            public <T extends graphql.schema.GraphQLType> Comparator<? super T> getComparator(GraphqlTypeComparatorEnvironment env) {
+                if (env.getElementType().equals(GraphQLFieldDefinition.class)) {
+                    return comparator(getFieldOrder(type, messageBundle), env);
+                }
+                if (env.getElementType().equals(GraphQLInputObjectField.class)
+                        || env.getElementType().equals(GraphQLEnumValueDefinition.class)) {
+                    return comparator(getInputFieldOrder(type, messageBundle), env);
+                }
+                return DEFAULT_REGISTRY.getComparator(env);
+            }
+        };
+    }
+
     @SuppressWarnings("unchecked")
     private String generateSimpleName(AnnotatedType type, MessageBundle messageBundle) {
-        Optional<String> name = Optional.ofNullable(type.getAnnotation(Type.class))
-                .map(Type::value)
-                .filter(Utils::isNotEmpty);
-        return messageBundle.interpolate(name.orElseGet(() -> getSimpleName(ClassUtils.getRawType(type.getType()))));
+        Optional<String>[] names = new Optional[]{
+                Optional.ofNullable(type.getAnnotation(GraphQLUnion.class))
+                        .map(GraphQLUnion::name),
+                Optional.ofNullable(type.getAnnotation(GraphQLInterface.class))
+                        .map(GraphQLInterface::name),
+                Optional.ofNullable(type.getAnnotation(GraphQLType.class))
+                        .map(GraphQLType::name),
+                Optional.ofNullable(type.getAnnotation(Type.class))
+                        .map(Type::value)
+        };
+        return messageBundle.interpolate(getFirstNonEmptyOrDefault(names, () -> getSimpleName(ClassUtils.getRawType(type.getType()))));
     }
 
     private String getFirstNonEmptyOrDefault(Optional<String>[] optionals, Supplier<String> defaultValue) {
@@ -99,5 +136,45 @@ public class DefaultTypeInfoGenerator implements TypeInfoGenerator {
             return getSimpleName(clazz.getComponentType()) + "Array";
         }
         return clazz.getSimpleName();
+    }
+
+    private String[] getFieldOrder(AnnotatedType type, MessageBundle messageBundle) {
+        String[] fieldOrder = Utils.or(
+                Optional.ofNullable(type.getAnnotation(GraphQLInterface.class))
+                        .map(GraphQLInterface::fieldOrder)
+                        .filter(Utils::isArrayNotEmpty),
+                Optional.ofNullable(type.getAnnotation(GraphQLType.class))
+                        .map(GraphQLType::fieldOrder)
+                        .filter(Utils::isArrayNotEmpty))
+                .orElse(Utils.emptyArray());
+        return Arrays.stream(fieldOrder).map(messageBundle::interpolate).toArray(String[]::new);
+    }
+
+    private String[] getInputFieldOrder(AnnotatedType type, MessageBundle messageBundle) {
+        Optional<GraphQLType> annotation = Optional.ofNullable(type.getAnnotation(GraphQLType.class));
+        String[] fieldOrder = Utils.or(
+                annotation.map(GraphQLType::inputFieldOrder).filter(Utils::isArrayNotEmpty),
+                annotation.map(GraphQLType::fieldOrder).filter(Utils::isArrayNotEmpty))
+                .orElse(Utils.emptyArray());
+        return Arrays.stream(fieldOrder).map(messageBundle::interpolate).toArray(String[]::new);
+    }
+
+    private boolean isOrdered(AnnotatedType type) {
+        return Stream.of(
+                Optional.ofNullable(type.getAnnotation(GraphQLInterface.class))
+                        .map(GraphQLInterface::fieldOrder),
+                Optional.ofNullable(type.getAnnotation(GraphQLType.class))
+                        .map(GraphQLType::fieldOrder),
+                Optional.ofNullable(type.getAnnotation(GraphQLType.class))
+                        .map(GraphQLType::inputFieldOrder))
+                .anyMatch(opt -> opt.filter(Utils::isArrayNotEmpty).isPresent());
+    }
+
+    private <T extends graphql.schema.GraphQLType> Comparator<? super T> comparator(String[] givenOrder, GraphqlTypeComparatorEnvironment env) {
+        if (givenOrder.length > 0) {
+            return Comparator.comparingInt((T t) -> Utils.indexOf(givenOrder, t.getName(), Integer.MAX_VALUE))
+                    .thenComparing(graphql.schema.GraphQLType::getName);
+        }
+        return DEFAULT_REGISTRY.getComparator(env);
     }
 }

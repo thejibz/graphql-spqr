@@ -3,7 +3,7 @@ package io.leangen.graphql.generator.mapping.common;
 import graphql.language.Field;
 import io.leangen.geantyref.GenericTypeReflector;
 import io.leangen.geantyref.TypeToken;
-import io.leangen.graphql.annotations.Info;
+import io.leangen.graphql.annotations.GraphQLEnvironment;
 import io.leangen.graphql.execution.ResolutionEnvironment;
 import io.leangen.graphql.generator.mapping.ArgumentInjector;
 import io.leangen.graphql.generator.mapping.ArgumentInjectorParams;
@@ -22,10 +22,13 @@ public class EnvironmentInjector implements ArgumentInjector {
     
     @Override
     public Object getArgumentValue(ArgumentInjectorParams params) {
+        Class raw = GenericTypeReflector.erase(params.getType().getType());
+        if (ResolutionEnvironment.class.isAssignableFrom(raw)) {
+            return params.getResolutionEnvironment();
+        }
         if (GenericTypeReflector.isSuperType(setOfStrings, params.getType().getType())) {
             return params.getResolutionEnvironment().dataFetchingEnvironment.getSelectionSet().get().keySet();
         }
-        Class raw = GenericTypeReflector.erase(params.getType().getType());
         if (Field.class.equals(raw)) {
             return params.getResolutionEnvironment().fields.get(0);
         }
@@ -35,15 +38,12 @@ public class EnvironmentInjector implements ArgumentInjector {
         if (ValueMapper.class.isAssignableFrom(raw)) {
             return params.getResolutionEnvironment().valueMapper;
         }
-        if (ResolutionEnvironment.class.isAssignableFrom(raw)) {
-            return params.getResolutionEnvironment();
-        }
-        throw new IllegalArgumentException("Argument of type " + raw.getName() 
-                + " can not be injected via @" + Info.class.getSimpleName());
+        throw new IllegalArgumentException("Argument of type " + raw.getName()
+                + " can not be injected via @" + GraphQLEnvironment.class.getSimpleName());
     }
 
     @Override
     public boolean supports(AnnotatedType type, Parameter parameter) {
-        return parameter != null && parameter.isAnnotationPresent(Info.class);
+        return parameter != null && parameter.isAnnotationPresent(GraphQLEnvironment.class);
     }
 }

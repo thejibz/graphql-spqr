@@ -1,12 +1,20 @@
 package io.leangen.graphql;
 
 import graphql.relay.Relay;
+import graphql.schema.DataFetcher;
+import graphql.schema.FieldCoordinates;
 import graphql.schema.GraphQLArgument;
+import graphql.schema.GraphQLCodeRegistry;
 import graphql.schema.GraphQLDirective;
 import graphql.schema.GraphQLFieldDefinition;
+import graphql.schema.GraphQLFieldsContainer;
+import graphql.schema.GraphQLInputFieldsContainer;
+import graphql.schema.GraphQLInterfaceType;
 import graphql.schema.GraphQLSchema;
 import graphql.schema.GraphQLType;
 import graphql.schema.GraphQLTypeReference;
+import graphql.schema.GraphQLUnionType;
+import graphql.schema.TypeResolver;
 import io.leangen.geantyref.AnnotatedTypeSet;
 import io.leangen.geantyref.GenericTypeReflector;
 import io.leangen.geantyref.TypeFactory;
@@ -44,7 +52,6 @@ import io.leangen.graphql.generator.mapping.common.EnumMapToObjectTypeAdapter;
 import io.leangen.graphql.generator.mapping.common.EnumMapper;
 import io.leangen.graphql.generator.mapping.common.EnvironmentInjector;
 import io.leangen.graphql.generator.mapping.common.IdAdapter;
-import io.leangen.graphql.generator.mapping.common.IdMapper;
 import io.leangen.graphql.generator.mapping.common.InputValueDeserializer;
 import io.leangen.graphql.generator.mapping.common.InterfaceMapper;
 import io.leangen.graphql.generator.mapping.common.IterableAdapter;
@@ -63,7 +70,7 @@ import io.leangen.graphql.generator.mapping.common.StreamToCollectionTypeAdapter
 import io.leangen.graphql.generator.mapping.common.UnionInlineMapper;
 import io.leangen.graphql.generator.mapping.common.UnionTypeMapper;
 import io.leangen.graphql.generator.mapping.common.VoidToBooleanTypeAdapter;
-import io.leangen.graphql.generator.mapping.core.CompletableFutureMapper;
+import io.leangen.graphql.generator.mapping.core.CompletableFutureAdapter;
 import io.leangen.graphql.generator.mapping.core.DataFetcherResultMapper;
 import io.leangen.graphql.generator.mapping.core.PublisherAdapter;
 import io.leangen.graphql.generator.mapping.strategy.AbstractInputHandler;
@@ -113,8 +120,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import static graphql.schema.GraphQLObjectType.newObject;
 import static java.util.Collections.addAll;
@@ -161,7 +168,7 @@ import static java.util.Collections.addAll;
 @SuppressWarnings("WeakerAccess")
 public class GraphQLSchemaGenerator {
 
-    private InterfaceMappingStrategy interfaceStrategy = new AnnotatedInterfaceStrategy(true);
+    private InterfaceMappingStrategy interfaceStrategy = new AnnotatedInterfaceStrategy();
     private ScalarDeserializationStrategy scalarStrategy;
     private AbstractInputHandler abstractInputHandler = new NoOpAbstractInputHandler();
     private OperationBuilder operationBuilder = new DefaultOperationBuilder(DefaultOperationBuilder.TypeInference.NONE);
@@ -195,6 +202,7 @@ public class GraphQLSchemaGenerator {
     private final RelayMappingConfig relayMappingConfig = new RelayMappingConfig();
     private final Map<String, GraphQLDirective> additionalDirectives = new HashMap<>();
     private final List<AnnotatedType> additionalDirectiveTypes = new ArrayList<>();
+    private final GraphQLCodeRegistry.Builder codeRegistry = GraphQLCodeRegistry.newCodeRegistry();
     private final Map<String, GraphQLType> additionalTypes = new HashMap<>();
     private final Set<Comparator<AnnotatedType>> typeComparators = new HashSet<>();
 
@@ -289,9 +297,7 @@ public class GraphQLSchemaGenerator {
      * @return This {@link GraphQLSchemaGenerator} instance, to allow method chaining
      */
     public GraphQLSchemaGenerator withOperationsFromSingleton(Object serviceSingleton, AnnotatedType beanType) {
-        checkType(beanType);
-        this.operationSourceRegistry.registerOperationSource(serviceSingleton, beanType);
-        return this;
+        return withOperationsFromBean(() -> serviceSingleton, beanType);
     }
 
     /**
@@ -344,7 +350,7 @@ public class GraphQLSchemaGenerator {
      */
     public GraphQLSchemaGenerator withOperationsFromSingleton(Object serviceSingleton, AnnotatedType beanType, ResolverBuilder... builders) {
         checkType(beanType);
-        this.operationSourceRegistry.registerOperationSource(serviceSingleton, beanType, Arrays.asList(builders));
+        this.operationSourceRegistry.registerOperationSource(() -> serviceSingleton, beanType, Arrays.asList(builders));
         return this;
     }
 
@@ -358,6 +364,27 @@ public class GraphQLSchemaGenerator {
      */
     public GraphQLSchemaGenerator withOperationsFromSingletons(Object... serviceSingletons) {
         Arrays.stream(serviceSingletons).forEach(this::withOperationsFromSingleton);
+        return this;
+    }
+
+    public GraphQLSchemaGenerator withOperationsFromBean(Supplier<Object> serviceSupplier, Type beanType) {
+        return withOperationsFromBean(serviceSupplier, GenericTypeReflector.annotate(beanType));
+    }
+
+    public GraphQLSchemaGenerator withOperationsFromBean(Supplier<Object> serviceSupplier, AnnotatedType beanType) {
+        checkType(beanType);
+        this.operationSourceRegistry.registerOperationSource(serviceSupplier, beanType);
+        return this;
+    }
+
+    public GraphQLSchemaGenerator withOperationsFromBean(Supplier<Object> serviceSupplier, Type beanType, ResolverBuilder... builders) {
+        checkType(beanType);
+        return withOperationsFromBean(serviceSupplier, GenericTypeReflector.annotate(beanType), builders);
+    }
+
+    public GraphQLSchemaGenerator withOperationsFromBean(Supplier<Object> serviceSupplier, AnnotatedType beanType, ResolverBuilder... builders) {
+        checkType(beanType);
+        this.operationSourceRegistry.registerOperationSource(serviceSupplier, beanType, Arrays.asList(builders));
         return this;
     }
 
@@ -388,62 +415,6 @@ public class GraphQLSchemaGenerator {
 
     public GraphQLSchemaGenerator withOperationsFromTypes(AnnotatedType... serviceType) {
         Arrays.stream(serviceType).forEach(this::withOperationsFromType);
-        return this;
-    }
-
-    /**
-     * Register a type to be scanned for exposed methods, using the globally registered builders.
-     * This is not normally required as domain types will be discovered dynamically and globally registered builders
-     * will be used anyway. Only needed when no exposed method refers to this domain type directly
-     * (relying exclusively on interfaces or super-types instead) and the type should still be mapped and listed in the resulting schema.
-     *
-     * @param types The domain types that are to be scanned for query/mutation methods
-     *
-     * @return This {@link GraphQLSchemaGenerator} instance, to allow method chaining
-     */
-    public GraphQLSchemaGenerator withNestedOperationsFromTypes(Type... types) {
-        Arrays.stream(types).forEach(this::withNestedResolverBuildersForType);
-        return this;
-    }
-
-    /**
-     * The same as {@link #withNestedOperationsFromTypes(Type...)} except that an {@link AnnotatedType} is used,
-     * so any extra annotations on the type (not only those directly on the class) are kept.
-     *
-     * @param types The domain types that are to be scanned for query/mutation methods
-     *
-     * @return This {@link GraphQLSchemaGenerator} instance, to allow method chaining
-     */
-    public GraphQLSchemaGenerator withNestedOperationsFromTypes(AnnotatedType... types) {
-        Arrays.stream(types).forEach(this::withNestedResolverBuildersForType);
-        return this;
-    }
-
-    /**
-     * Register {@code querySourceType} type to be scanned for exposed methods, using the provided {@link ResolverBuilder}s.
-     * Domain types are discovered dynamically, when referred to by an exposed method (either as its parameter type or return type).
-     * This method gives a way to customize how the discovered domain type will be analyzed.
-     *
-     * @param querySourceType The domain type that is to be scanned for query/mutation methods
-     * @param resolverBuilders Custom resolverBuilders to use when analyzing {@code querySourceType} type
-     *
-     * @return This {@link GraphQLSchemaGenerator} instance, to allow method chaining
-     */
-    public GraphQLSchemaGenerator withNestedResolverBuildersForType(Type querySourceType, ResolverBuilder... resolverBuilders) {
-        return withNestedResolverBuildersForType(GenericTypeReflector.annotate(querySourceType), resolverBuilders);
-    }
-
-    /**
-     * Same as {@link #withNestedResolverBuildersForType(Type, ResolverBuilder...)} except that an {@link AnnotatedType} is used
-     * so any extra annotations on the type (not only those directly on the class) are kept.
-     *
-     * @param querySourceType The annotated domain type that is to be scanned for query/mutation methods
-     * @param resolverBuilders Custom resolverBuilders to use when analyzing {@code querySourceType} type
-     *
-     * @return This {@link GraphQLSchemaGenerator} instance, to allow method chaining
-     */
-    public GraphQLSchemaGenerator withNestedResolverBuildersForType(AnnotatedType querySourceType, ResolverBuilder... resolverBuilders) {
-        this.operationSourceRegistry.registerNestedOperationSource(querySourceType, Arrays.asList(resolverBuilders));
         return this;
     }
 
@@ -702,15 +673,61 @@ public class GraphQLSchemaGenerator {
         return this;
     }
 
+    @Deprecated
     public GraphQLSchemaGenerator withAdditionalTypes(Collection<GraphQLType> additionalTypes) {
-        additionalTypes.stream()
-                .filter(this::isRealType)
-                .forEach(type -> {
-                    if (this.additionalTypes.put(type.getName(), type) != null) {
-                        throw new ConfigurationException("Type name collision: multiple registered additional types are named '" + type.getName() + "'");
-                    }
-                });
+        return withAdditionalTypes(additionalTypes, new NoOpCodeRegistryBuilder());
+    }
+
+    public GraphQLSchemaGenerator withAdditionalTypes(Collection<GraphQLType> additionalTypes, GraphQLCodeRegistry codeRegistry) {
+        return withAdditionalTypes(additionalTypes, new CodeRegistryMerger(codeRegistry));
+    }
+
+    public GraphQLSchemaGenerator withAdditionalTypes(Collection<GraphQLType> additionalTypes, CodeRegistryBuilder codeRegistryUpdater) {
+        additionalTypes.forEach(type -> merge(type, this.additionalTypes, codeRegistryUpdater, this.codeRegistry));
         return this;
+    }
+
+    private void merge(GraphQLType type, Map<String, GraphQLType> additionalTypes, CodeRegistryBuilder updater, GraphQLCodeRegistry.Builder builder) {
+        type = GraphQLUtils.unwrap(type);
+        if (!isRealType(type)) {
+            return;
+        }
+        if (additionalTypes.containsKey(type.getName())) {
+            if (additionalTypes.get(type.getName()).equals(type)) {
+                return;
+            }
+            throw new ConfigurationException("Type name collision: multiple registered additional types are named '" + type.getName() + "'");
+        }
+        additionalTypes.put(type.getName(), type);
+
+        if (type instanceof GraphQLInterfaceType) {
+            TypeResolver typeResolver = updater.getTypeResolver((GraphQLInterfaceType) type);
+            if (typeResolver != null) {
+                builder.typeResolverIfAbsent((GraphQLInterfaceType) type, typeResolver);
+            }
+        }
+        if (type instanceof GraphQLUnionType) {
+            TypeResolver typeResolver = updater.getTypeResolver((GraphQLUnionType) type);
+            if (typeResolver != null) {
+                builder.typeResolverIfAbsent((GraphQLUnionType) type, typeResolver);
+            }
+        }
+        if (type instanceof GraphQLFieldsContainer) {
+            GraphQLFieldsContainer fieldsContainer = (GraphQLFieldsContainer) type;
+            fieldsContainer.getFieldDefinitions().forEach(fieldDef -> {
+                DataFetcher<?> dataFetcher = updater.getDataFetcher(fieldsContainer, fieldDef);
+                if (dataFetcher != null) {
+                    builder.dataFetcherIfAbsent(FieldCoordinates.coordinates(fieldsContainer, fieldDef), dataFetcher);
+                }
+                merge(fieldDef.getType(), additionalTypes, updater, builder);
+
+                fieldDef.getArguments().forEach(arg -> merge(arg.getType(), additionalTypes, updater, builder));
+            });
+        }
+        if (type instanceof GraphQLInputFieldsContainer) {
+            ((GraphQLInputFieldsContainer) type).getFieldDefinitions()
+                    .forEach(fieldDef -> merge(fieldDef.getType(), additionalTypes, updater, builder));
+        }
     }
 
     public GraphQLSchemaGenerator withAdditionalDirectives(Type... additionalDirectives) {
@@ -724,11 +741,13 @@ public class GraphQLSchemaGenerator {
     }
 
     public GraphQLSchemaGenerator withAdditionalDirectives(GraphQLDirective... additionalDirectives) {
+        CodeRegistryBuilder noOp = new NoOpCodeRegistryBuilder();
         Arrays.stream(additionalDirectives)
                 .forEach(directive -> {
                     if (this.additionalDirectives.put(directive.getName(), directive) != null) {
                         throw new ConfigurationException("Directive name collision: multiple registered additional directives are named '" + directive.getName() + "'");
                     }
+                    directive.getArguments().forEach(arg -> merge(arg.getType(), this.additionalTypes, noOp, this.codeRegistry));
                 });
         return this;
     }
@@ -824,6 +843,15 @@ public class GraphQLSchemaGenerator {
      */
     private void init() {
         GeneratorConfiguration configuration = new GeneratorConfiguration(interfaceStrategy, scalarStrategy, typeTransformer, basePackages, javaDeprecationConfig);
+
+        //Modules must go first to get a chance to change other settings
+        List<Module> modules = Defaults.modules();
+        for (ExtensionProvider<GeneratorConfiguration, Module> provider : moduleProviders) {
+            modules = provider.getExtensions(configuration, new ExtensionList<>(modules));
+        }
+        checkForDuplicates("modules", modules);
+        modules.forEach(module -> module.setUp(() -> this));
+
         if (operationSourceRegistry.isEmpty()) {
             throw new IllegalStateException("At least one top-level operation source must be registered");
         }
@@ -841,13 +869,6 @@ public class GraphQLSchemaGenerator {
                 scalarStrategy = (ScalarDeserializationStrategy) Defaults.valueMapperFactory(typeInfoGenerator);
             }
         }
-
-        List<Module> modules = Defaults.modules();
-        for (ExtensionProvider<GeneratorConfiguration, Module> provider : moduleProviders) {
-            modules = provider.getExtensions(configuration, new ExtensionList<>(modules));
-        }
-        checkForDuplicates("modules", modules);
-        modules.forEach(module -> module.setUp(() -> this));
 
         List<ResolverBuilder> resolverBuilders = Collections.singletonList(new AnnotatedResolverBuilder());
         for (ExtensionProvider<GeneratorConfiguration, ResolverBuilder> provider : resolverBuilderProviders) {
@@ -869,7 +890,7 @@ public class GraphQLSchemaGenerator {
         PublisherAdapter publisherAdapter = new PublisherAdapter();
         EnumMapper enumMapper = new EnumMapper(javaDeprecationConfig);
         typeMappers = Arrays.asList(
-                new NonNullMapper(), new IdMapper(), new IdAdapter(), new ScalarMapper(), new CompletableFutureMapper(),
+                new NonNullMapper(), new IdAdapter(), new ScalarMapper(), new CompletableFutureAdapter<>(),
                 publisherAdapter, new AnnotationMapper(), new OptionalIntAdapter(), new OptionalLongAdapter(), new OptionalDoubleAdapter(),
                 enumMapper, new ArrayAdapter(), new UnionTypeMapper(), new UnionInlineMapper(),
                 new StreamToCollectionTypeAdapter(), new DataFetcherResultMapper(), new VoidToBooleanTypeAdapter(),
@@ -887,7 +908,7 @@ public class GraphQLSchemaGenerator {
         checkForEmptyOrDuplicates("schema transformers", transformers);
 
         List<OutputConverter> outputConverters = Arrays.asList(
-                new IdAdapter(), new VoidToBooleanTypeAdapter(), new ArrayAdapter(), new CollectionOutputConverter(),
+                new IdAdapter(), new ArrayAdapter(), new CollectionOutputConverter(), new CompletableFutureAdapter<>(),
                 new OptionalIntAdapter(), new OptionalLongAdapter(), new OptionalDoubleAdapter(), new OptionalAdapter(),
                 new StreamToCollectionTypeAdapter(), publisherAdapter);
         for (ExtensionProvider<GeneratorConfiguration, OutputConverter> provider : outputConverterProviders) {
@@ -895,7 +916,7 @@ public class GraphQLSchemaGenerator {
         }
         checkForDuplicates("output converters", outputConverters);
 
-        List<InputConverter> inputConverters = Arrays.asList(
+        List<InputConverter> inputConverters = Arrays.asList(new CompletableFutureAdapter<>(),
                 new StreamToCollectionTypeAdapter(), new IterableAdapter<>(), new EnumMapToObjectTypeAdapter(enumMapper));
         for (ExtensionProvider<GeneratorConfiguration, InputConverter> provider : inputConverterProviders) {
             inputConverters = provider.getExtensions(configuration, new ExtensionList<>(inputConverters));
@@ -910,7 +931,7 @@ public class GraphQLSchemaGenerator {
         }
         checkForDuplicates("argument injectors", argumentInjectors);
 
-        List<ResolverInterceptorFactory> interceptorFactories = Collections.emptyList();
+        List<ResolverInterceptorFactory> interceptorFactories = Collections.singletonList(new VoidToBooleanTypeAdapter());
         for (ExtensionProvider<GeneratorConfiguration, ResolverInterceptorFactory> provider : this.interceptorFactoryProviders) {
             interceptorFactories = provider.getExtensions(configuration, new ExtensionList<>(interceptorFactories));
         }
@@ -953,18 +974,22 @@ public class GraphQLSchemaGenerator {
     public GraphQLSchema generate() {
         init();
 
+        final String queryRootName = messageBundle.interpolate(queryRoot);
+        final String mutationRootName = messageBundle.interpolate(mutationRoot);
+        final String subscriptionRootName = messageBundle.interpolate(subscriptionRoot);
+
         BuildContext buildContext = new BuildContext(
                 basePackages, environment, new OperationRegistry(operationSourceRegistry, operationBuilder, inclusionStrategy,
                 typeTransformer, basePackages, environment), new TypeMapperRegistry(typeMappers),
                 new SchemaTransformerRegistry(transformers), valueMapperFactory, typeInfoGenerator, messageBundle, interfaceStrategy,
                 scalarStrategy, typeTransformer, abstractInputHandler, new InputFieldBuilderRegistry(inputFieldBuilders),
-                interceptorFactory, directiveBuilder, inclusionStrategy, relayMappingConfig, additionalTypes(), additionalDirectiveTypes,
-                typeComparator, implDiscoveryStrategy);
-        OperationMapper operationMapper = new OperationMapper(buildContext);
+                interceptorFactory, directiveBuilder, inclusionStrategy, relayMappingConfig, additionalTypes.values(),
+                additionalDirectiveTypes, typeComparator, implDiscoveryStrategy, codeRegistry);
+        OperationMapper operationMapper = new OperationMapper(queryRootName, mutationRootName, subscriptionRootName, buildContext);
 
         GraphQLSchema.Builder builder = GraphQLSchema.newSchema();
         builder.query(newObject()
-                .name(messageBundle.interpolate(queryRoot))
+                .name(queryRootName)
                 .description(messageBundle.interpolate(queryRootDescription))
                 .fields(operationMapper.getQueries())
                 .build());
@@ -972,7 +997,7 @@ public class GraphQLSchemaGenerator {
         List<GraphQLFieldDefinition> mutations = operationMapper.getMutations();
         if (!mutations.isEmpty()) {
             builder.mutation(newObject()
-                    .name(messageBundle.interpolate(mutationRoot))
+                    .name(mutationRootName)
                     .description(messageBundle.interpolate(mutationRootDescription))
                     .fields(mutations)
                     .build());
@@ -981,7 +1006,7 @@ public class GraphQLSchemaGenerator {
         List<GraphQLFieldDefinition> subscriptions = operationMapper.getSubscriptions();
         if (!subscriptions.isEmpty()) {
             builder.subscription(newObject()
-                    .name(messageBundle.interpolate(subscriptionRoot))
+                    .name(subscriptionRootName)
                     .description(messageBundle.interpolate(subscriptionRootDescription))
                     .fields(subscriptions)
                     .build());
@@ -993,6 +1018,8 @@ public class GraphQLSchemaGenerator {
 
         builder.additionalDirectives(new HashSet<>(additionalDirectives.values()));
         builder.additionalDirectives(new HashSet<>(operationMapper.getDirectives()));
+
+        builder.codeRegistry(buildContext.codeRegistry.build());
 
         applyProcessors(builder, buildContext);
         buildContext.executePostBuildHooks();
@@ -1018,23 +1045,9 @@ public class GraphQLSchemaGenerator {
                 || type.getName().equals(messageBundle.interpolate(subscriptionRoot)));
     }
 
-    private Collection<GraphQLType> additionalTypes() {
-        Set<GraphQLType> additional = Stream.concat(
-                additionalTypes.values().stream(),
-                additionalDirectives.values().stream().flatMap(directive -> directive.getArguments().stream().map(GraphQLArgument::getType)))
-                .filter(this::isRealType)
-                .collect(Collectors.toSet());
-        additional.stream().collect(Collectors.groupingBy(GraphQLType::getName)).forEach((name, types) -> {
-            if (types.stream().anyMatch(type -> types.stream().anyMatch(t -> !t.equals(type)))) {
-                throw new ConfigurationException("Type name collision: multiple registered additional types are named '" + name + "'");
-            }
-        });
-        return additional;
-    }
-
     private void checkType(Type type) {
         if (type == null) {
-            throw new TypeMappingException();
+            throw TypeMappingException.unknownType();
         }
         Class<?> clazz = ClassUtils.getRawType(type);
         if (ClassUtils.isProxy(clazz)) {
@@ -1052,7 +1065,7 @@ public class GraphQLSchemaGenerator {
 
     private void checkType(AnnotatedType type) {
         if (type == null) {
-            throw new TypeMappingException();
+            throw TypeMappingException.unknownType();
         }
         checkType(type.getType());
     }
@@ -1064,16 +1077,55 @@ public class GraphQLSchemaGenerator {
         checkForDuplicates(extensionType, extensions);
     }
 
-    private void checkForDuplicates(String extensionType, List<?> extensions) {
-        Set<Class<?>> classes = new HashSet<>();
-        extensions.stream()
-                .map(Object::getClass)
-                .forEach(clazz -> {
-                    if (!classes.add(clazz)) {
-                        throw new ConfigurationException("Multiple " + extensionType + " of type " + clazz.getName() + " registered");
-                    }
-                });
+    private <E> void checkForDuplicates(String extensionType, List<E> extensions) {
+        Set<E> seen = new HashSet<>();
+        extensions.forEach(element -> {
+            if (!seen.add(element)) {
+                throw new ConfigurationException("Duplicate " + extensionType + " of type " + element.getClass().getName() + " registered");
+            }
+        });
     }
+
+    public interface CodeRegistryBuilder {
+
+        default TypeResolver getTypeResolver(GraphQLInterfaceType interfaceType) {
+            return null;
+        }
+
+        default TypeResolver getTypeResolver(GraphQLUnionType unionType) {
+            return null;
+        }
+
+        default DataFetcher<?> getDataFetcher(GraphQLFieldsContainer parentType, GraphQLFieldDefinition fieldDef) {
+            return null;
+        }
+    }
+
+    private static class CodeRegistryMerger implements CodeRegistryBuilder {
+
+        private final GraphQLCodeRegistry codeRegistry;
+
+        public CodeRegistryMerger(GraphQLCodeRegistry codeRegistry) {
+            this.codeRegistry = codeRegistry;
+        }
+
+        @Override
+        public TypeResolver getTypeResolver(GraphQLInterfaceType interfaceType) {
+            return codeRegistry.getTypeResolver(interfaceType);
+        }
+
+        @Override
+        public TypeResolver getTypeResolver(GraphQLUnionType unionType) {
+            return codeRegistry.getTypeResolver(unionType);
+        }
+
+        @Override
+        public DataFetcher<?> getDataFetcher(GraphQLFieldsContainer parentType, GraphQLFieldDefinition fieldDef) {
+            return codeRegistry.getDataFetcher(parentType, fieldDef);
+        }
+    }
+
+    private static class NoOpCodeRegistryBuilder implements CodeRegistryBuilder {}
 
     private static class MemoizedValueMapperFactory implements ValueMapperFactory {
 

@@ -4,6 +4,7 @@ import io.leangen.geantyref.GenericTypeReflector;
 import io.leangen.geantyref.TypeFactory;
 import io.leangen.graphql.annotations.GraphQLUnion;
 import io.leangen.graphql.metadata.exceptions.TypeMappingException;
+import io.leangen.graphql.metadata.strategy.value.Property;
 
 import java.beans.Introspector;
 import java.io.Closeable;
@@ -20,6 +21,7 @@ import java.lang.reflect.Executable;
 import java.lang.reflect.Field;
 import java.lang.reflect.GenericArrayType;
 import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Member;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.Parameter;
@@ -38,6 +40,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -51,10 +54,10 @@ import static java.util.Arrays.stream;
 public class ClassUtils {
 
     private static final Class<?> javassistProxyClass;
-    private static final String CGLIB_CLASS_SEPARATOR = "$$";
-    private static final Set<Class> ROOT_TYPES = Collections.unmodifiableSet( new HashSet<>(Arrays.asList(
+    private static final List<String> KNOWN_PROXY_CLASS_SEPARATORS = Arrays.asList("$$", "$ByteBuddy$", "$HibernateProxy$");
+    private static final List<Class> ROOT_TYPES = Arrays.asList(
             Object.class, Annotation.class, Cloneable.class, Comparable.class, Externalizable .class, Serializable.class,
-            Closeable.class, AutoCloseable.class)));
+            Closeable.class, AutoCloseable.class);
 
     static {
         Class<?> proxy;
@@ -92,6 +95,19 @@ public class ClassUtils {
     public static Set<Field> getAnnotatedFields(final Class<?> type, final Class<? extends Annotation> annotation) {
         return stream(type.getFields())
                 .filter(element -> element.isAnnotationPresent(annotation))
+                .collect(Collectors.toSet());
+    }
+
+    public static Set<Property> getProperties(final Class<?> type) {
+        return stream(type.getMethods())
+                .filter(ClassUtils::isGetter)
+                .map(getter -> findFieldByGetter(getter)
+                        .map(field -> new Property(field, getter))
+                        .filter(prop -> prop.getField().getType().equals(prop.getGetter().getReturnType()))
+                        .filter(prop -> !Modifier.isPublic(prop.getField().getModifiers()))
+                        .filter(prop -> !Modifier.isAbstract(prop.getGetter().getModifiers())))
+                .filter(Optional::isPresent)
+                .map(Optional::get)
                 .collect(Collectors.toSet());
     }
 
@@ -205,7 +221,7 @@ public class ClassUtils {
      * @see ClassUtils#isSetter(Method)
      */
     public static boolean isGetter(Method getter) {
-        return getter.getParameterCount() == 0 && getter.getReturnType() != void.class
+        return isReal(getter) && getter.getParameterCount() == 0 && getter.getReturnType() != void.class
                 && getter.getReturnType() != Void.class && getter.getName().startsWith("get") ||
                 ((getter.getReturnType() == Boolean.class || getter.getReturnType() == boolean.class)
                         && getter.getName().startsWith("is"));
@@ -219,7 +235,11 @@ public class ClassUtils {
      * @see ClassUtils#isGetter(Method)
      */
     public static boolean isSetter(Method setter) {
-        return setter.getName().startsWith("set") && setter.getParameterCount() == 1;
+        return isReal(setter) && setter.getName().startsWith("set") && setter.getParameterCount() == 1;
+    }
+
+    public static boolean isReal(Method method) {
+        return !method.isBridge() && !method.isSynthetic();
     }
 
     public static String getFieldNameFromGetter(Method getter) {
@@ -236,11 +256,25 @@ public class ClassUtils {
         return Introspector.decapitalize(setter.getName().replaceAll("^set", ""));
     }
 
-    public static List<AnnotatedElement> getPropertyMembers(Field field) {
+    public static <T extends Member & AnnotatedElement> List<AnnotatedElement> getPropertyMembers(T member) {
         List<AnnotatedElement> propertyElements = new ArrayList<>(3);
-        ClassUtils.findSetter(field.getDeclaringClass(), field.getName(), field.getType()).ifPresent(propertyElements::add);
-        ClassUtils.findGetter(field.getDeclaringClass(), field.getName()).ifPresent(propertyElements::add);
-        propertyElements.add(field);
+        if (member instanceof Field) {
+            findSetter(member.getDeclaringClass(), member.getName(), ((Field) member).getType()).ifPresent(propertyElements::add);
+            findGetter(member.getDeclaringClass(), member.getName()).ifPresent(propertyElements::add);
+            propertyElements.add(member);
+        }
+        if (member instanceof Method && isGetter((Method) member)) {
+            Method getter = (Method) member;
+            findSetter(getter.getDeclaringClass(), getFieldNameFromGetter(getter), getter.getReturnType()).ifPresent(propertyElements::add);
+            propertyElements.add(getter);
+            findFieldByGetter(getter).ifPresent(propertyElements::add);
+        }
+        if (member instanceof Method && isSetter((Method) member)) {
+            Method setter = (Method) member;
+            propertyElements.add(setter);
+            findGetter(setter.getDeclaringClass(), getFieldNameFromSetter(setter)).ifPresent(propertyElements::add);
+            findFieldBySetter(setter).ifPresent(propertyElements::add);
+        }
         return propertyElements;
     }
 
@@ -263,15 +297,19 @@ public class ClassUtils {
     }
 
     public static Optional<Field> findField(Class<?> type, String fieldName) {
+        return findField(type, field -> field.getName().equals(fieldName));
+    }
+
+    public static Optional<Field> findField(Class<?> type, Predicate<Field> condition) {
         if (type.isInterface()) {
             return Optional.empty();
         }
         while (!type.equals(Object.class)) {
-            try {
-                return Optional.of(type.getDeclaredField(fieldName));
-            } catch (NoSuchFieldException e) {
-                type = type.getSuperclass();
+            Optional<Field> match = stream(type.getDeclaredFields()).filter(condition).findFirst();
+            if (match.isPresent()) {
+                return match;
             }
+            type = type.getSuperclass();
         }
         return Optional.empty();
     }
@@ -298,25 +336,6 @@ public class ClassUtils {
         }
     }
 
-    public static <T extends Annotation> T getAnnotation(Method method, Class<T> annotation) {
-        if (method.isAnnotationPresent(annotation)) {
-            return method.getAnnotation(annotation);
-        }
-        if (isGetter(method)) {
-            return findFieldByGetter(method)
-                    .filter(f -> Modifier.isPrivate(f.getModifiers()))
-                    .map(f -> f.getAnnotation(annotation))
-                    .orElse(null);
-        }
-        if (isSetter(method)) {
-            return findFieldBySetter(method)
-                    .filter(f -> Modifier.isPrivate(f.getModifiers()))
-                    .map(f -> f.getAnnotation(annotation))
-                    .orElse(null);
-        }
-        return null;
-    }
-
     /**
      * Searches for the implementations/subtypes of the given {@link AnnotatedType}. Only the matching classes are loaded.
      *
@@ -329,7 +348,7 @@ public class ClassUtils {
      */
     @Deprecated
     public static List<AnnotatedType> findImplementations(AnnotatedType superType, String... packages) {
-        return new ClassFinder().findImplementations(superType, info -> true, packages);
+        return new ClassFinder().findImplementations(superType, info -> true, false, packages);
     }
 
     /**
@@ -365,6 +384,14 @@ public class ClassUtils {
                 && ClassUtils.getRawType(superType).isAssignableFrom(ClassUtils.getRawType(subType)))
                 || (GenericTypeReflector.box(subType) == superType)
                 || GenericTypeReflector.isSuperType(superType, subType);
+    }
+
+    public static boolean isSuperClass(Class<?> superClass, AnnotatedType subType) {
+        return superClass.isAssignableFrom(GenericTypeReflector.erase(subType.getType()));
+    }
+
+    public static boolean isSuperClass(AnnotatedType superType, Class<?> subClass) {
+        return GenericTypeReflector.erase(superType.getType()).isAssignableFrom(subClass);
     }
 
     public static boolean isSubPackage(Package pkg, String prefix) {
@@ -469,7 +496,7 @@ public class ClassUtils {
                 if (replacement != null) {
                     bound = replacement;
                 } else {
-                    throw new TypeMappingException(type.getType());
+                    throw TypeMappingException.ambiguousType(type.getType());
                 }
             }
             return GenericTypeReflector.updateAnnotations(bound, type.getAnnotations());
@@ -480,7 +507,7 @@ public class ClassUtils {
                 if (replacement != null) {
                     bound = replacement;
                 } else {
-                    throw new TypeMappingException(type.getType());
+                    throw TypeMappingException.ambiguousType(type.getType());
                 }
             }
             return GenericTypeReflector.updateAnnotations(bound, type.getAnnotations());
@@ -506,12 +533,10 @@ public class ClassUtils {
             } else {
                 if (isMissingTypeParameters(clazz)) {
                     if (replacement == null) {
-                        throw new TypeMappingException(clazz);
+                        throw TypeMappingException.ambiguousType(clazz);
                     }
                     AnnotatedType[] parameters = new AnnotatedType[clazz.getTypeParameters().length];
-                    for (int i = 0; i < parameters.length; i++) {
-                        parameters[i] = replacement;
-                    }
+                    Arrays.fill(parameters, replacement);
                     return TypeFactory.parameterizedAnnotatedClass(clazz, type.getAnnotations(), parameters);
                 }
             }
@@ -686,7 +711,7 @@ public class ClassUtils {
     public static boolean isProxy(Class<?> clazz) {
         return Proxy.isProxyClass(clazz)
                 || (javassistProxyClass != null && javassistProxyClass.isAssignableFrom(clazz))
-                || clazz.getName().contains(CGLIB_CLASS_SEPARATOR); //cglib
+                || KNOWN_PROXY_CLASS_SEPARATORS.stream().anyMatch(separator -> clazz.getName().contains(separator));
     }
 
     public static Class<?> forName(String className) throws ClassNotFoundException {

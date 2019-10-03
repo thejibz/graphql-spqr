@@ -1,11 +1,8 @@
 package io.leangen.graphql.metadata.strategy;
 
-import io.leangen.graphql.annotations.Context;
-import io.leangen.graphql.annotations.Ignore;
-import io.leangen.graphql.annotations.Info;
+import io.leangen.graphql.annotations.GraphQLIgnore;
 import io.leangen.graphql.util.ClassUtils;
 import io.leangen.graphql.util.Utils;
-import org.eclipse.microprofile.graphql.Source;
 
 import java.lang.reflect.AnnotatedElement;
 import java.lang.reflect.AnnotatedType;
@@ -22,21 +19,31 @@ public class DefaultInclusionStrategy implements InclusionStrategy {
 
     @Override
     public boolean includeOperation(AnnotatedElement element, AnnotatedType type) {
-        return !ClassUtils.hasAnnotation(element, Ignore.class);
+        return !ClassUtils.hasAnnotation(element, GraphQLIgnore.class);
     }
 
     @Override
     public boolean includeArgument(Parameter parameter, AnnotatedType type) {
-        return !ClassUtils.hasAnnotation(parameter, Ignore.class)
-                && !parameter.isAnnotationPresent(Source.class)
-                && !parameter.isAnnotationPresent(Context.class)
-                && !parameter.isAnnotationPresent(Info.class);
+        return !ClassUtils.hasAnnotation(parameter, GraphQLIgnore.class);
     }
 
     @Override
-    public boolean includeInputField(Class<?> declaringClass, AnnotatedElement element, AnnotatedType elementType) {
-        return !ClassUtils.hasAnnotation(element, Ignore.class)
-                && (Utils.isArrayEmpty(basePackages)
-                || Arrays.stream(basePackages).anyMatch(pkg -> ClassUtils.isSubPackage(declaringClass.getPackage(), pkg)));
+    public boolean includeInputField(InputFieldInclusionParams params) {
+        return params.getElements().stream().noneMatch(element -> ClassUtils.hasAnnotation(element, GraphQLIgnore.class))
+                && (params.isDirectlyDeserializable() || params.isDeserializableInSubType()) //is ever deserializable
+                && isPackageAcceptable(params.getType(), params.getElementDeclaringClass());
+    }
+
+    protected boolean isPackageAcceptable(AnnotatedType type, Class<?> elementDeclaringClass) {
+        Class<?> rawType = ClassUtils.getRawType(type.getType());
+        String[] packages = new String[0];
+        if (Utils.isArrayNotEmpty(this.basePackages)) {
+            packages = this.basePackages;
+        } else if (rawType.getPackage() != null) {
+            packages = new String[] {rawType.getPackage().getName()};
+        }
+        packages = Arrays.stream(packages).filter(Utils::isNotEmpty).toArray(String[]::new); //remove the default package
+        return elementDeclaringClass.equals(rawType)
+                || Arrays.stream(packages).anyMatch(basePackage -> ClassUtils.isSubPackage(elementDeclaringClass.getPackage(), basePackage));
     }
 }
