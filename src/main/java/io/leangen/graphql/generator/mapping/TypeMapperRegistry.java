@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
+import org.eclipse.microprofile.graphql.Ignore;
 
 /**
  * @author Bojan Tomic (kaqqao)
@@ -36,7 +37,7 @@ public class TypeMapperRegistry {
     }
 
     public AnnotatedType getMappableType(AnnotatedType type) {
-        Optional<TypeMapper> mapper = this.getTypeMapper(type, typeMapper -> !typeMapper.getClass().isAnnotationPresent(GraphQLIgnore.class));
+        Optional<TypeMapper> mapper = this.getTypeMapper(type, typeMapper -> (!typeMapper.getClass().isAnnotationPresent(GraphQLIgnore.class) && !typeMapper.getClass().isAnnotationPresent(Ignore.class)));
         if (mapper.isPresent() && mapper.get() instanceof TypeSubstituter) {
             return getMappableType(((TypeSubstituter) mapper.get()).getSubstituteType(type));
         }

@@ -8,6 +8,7 @@ import java.lang.reflect.AnnotatedElement;
 import java.lang.reflect.AnnotatedType;
 import java.lang.reflect.Parameter;
 import java.util.Arrays;
+import org.eclipse.microprofile.graphql.Ignore;
 
 public class DefaultInclusionStrategy implements InclusionStrategy {
 
@@ -19,17 +20,17 @@ public class DefaultInclusionStrategy implements InclusionStrategy {
 
     @Override
     public boolean includeOperation(AnnotatedElement element, AnnotatedType type) {
-        return !ClassUtils.hasAnnotation(element, GraphQLIgnore.class);
+        return (!ClassUtils.hasAnnotation(element, GraphQLIgnore.class) && !ClassUtils.hasAnnotation(element, Ignore.class));
     }
 
     @Override
     public boolean includeArgument(Parameter parameter, AnnotatedType type) {
-        return !ClassUtils.hasAnnotation(parameter, GraphQLIgnore.class);
+        return (!ClassUtils.hasAnnotation(parameter, GraphQLIgnore.class) && !ClassUtils.hasAnnotation(parameter, Ignore.class));
     }
 
     @Override
     public boolean includeInputField(InputFieldInclusionParams params) {
-        return params.getElements().stream().noneMatch(element -> ClassUtils.hasAnnotation(element, GraphQLIgnore.class))
+        return params.getElements().stream().noneMatch(element -> (ClassUtils.hasAnnotation(element, GraphQLIgnore.class)) || ClassUtils.hasAnnotation(element, Ignore.class))
                 && (params.isDirectlyDeserializable() || params.isDeserializableInSubType()) //is ever deserializable
                 && isPackageAcceptable(params.getType(), params.getElementDeclaringClass());
     }
