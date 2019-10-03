@@ -29,7 +29,8 @@ public class DefaultInclusionStrategy implements InclusionStrategy {
 
     @Override
     public boolean includeArgument(Parameter parameter, AnnotatedType type) {
-        return (!ClassUtils.hasAnnotation(parameter, GraphQLIgnore.class, Ignore.class, JsonbTransient.class, Source.class, GraphQLContext.class));
+        return (!ClassUtils.hasAnnotation(parameter, GraphQLIgnore.class, Ignore.class, JsonbTransient.class, Source.class, GraphQLContext.class) && 
+                !ClassUtils.hasAnnotationOnGetter(parameter, GraphQLIgnore.class, Ignore.class, JsonbTransient.class));
     }
 
     @Override
